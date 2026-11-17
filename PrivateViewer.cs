@@ -172,9 +172,8 @@ namespace PrivateViewerApp
             this.KeyPreview = true;
             this.AllowDrop = true;
             this.Opacity = 0.10; // Avvio con 90% trasparenza (10% opacità)
-
-            // Mostra nella barra delle applicazioni (disattivabile con la casella Stealth)
-            this.ShowInTaskbar = true;
+            this.TopMost = true; // Sempre in primo piano di default
+            this.ShowInTaskbar = false; // Invisibile nella barra applicazioni di default (Stealth)
 
             toolTip = new ToolTip();
             toolTip.AutoPopDelay = 4000;
@@ -307,6 +306,7 @@ namespace PrivateViewerApp
             chkAlwaysOnTop.ForeColor = Color.LightGray;
             chkAlwaysOnTop.Font = new Font("Segoe UI", 9);
             chkAlwaysOnTop.AutoSize = true;
+            chkAlwaysOnTop.Checked = true;
             chkAlwaysOnTop.Margin = new Padding(6, 8, 6, 4);
             chkAlwaysOnTop.CheckedChanged += (s, e) => { this.TopMost = chkAlwaysOnTop.Checked; };
 
@@ -315,7 +315,7 @@ namespace PrivateViewerApp
             chkHideTaskbar.ForeColor = Color.YellowGreen;
             chkHideTaskbar.Font = new Font("Segoe UI", 9, FontStyle.Bold);
             chkHideTaskbar.AutoSize = true;
-            chkHideTaskbar.Checked = false;
+            chkHideTaskbar.Checked = true;
             chkHideTaskbar.Margin = new Padding(6, 8, 6, 4);
             chkHideTaskbar.CheckedChanged += (s, e) => {
                 this.ShowInTaskbar = !chkHideTaskbar.Checked;
