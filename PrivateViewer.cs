@@ -62,8 +62,12 @@ namespace PrivateViewerApp
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
-        // Core WebView2 Shared Environment
+        // Core WebView2 Shared Environment & Concurrency Controls
         private static CoreWebView2Environment sharedEnv;
+        private static Task<CoreWebView2Environment> envInitTask;
+        private static readonly object envLock = new object();
+        private static readonly System.Threading.SemaphoreSlim wvInitSemaphore = new System.Threading.SemaphoreSlim(1, 1);
+        private bool isAddingTab = false;
 
         // Top Control Panel (Unico, pulito e compatto)
         private Panel topPanel;
@@ -394,9 +398,19 @@ namespace PrivateViewerApp
             tabControl.TabPages.Add(tabAddButton);
 
             tabControl.SelectedIndexChanged += (s, e) => {
-                if (tabControl.SelectedTab == tabAddButton)
+                if (tabControl.SelectedTab == tabAddButton && !isAddingTab)
                 {
-                    AddNewBrowserTab("https://www.google.com");
+                    isAddingTab = true;
+                    this.BeginInvoke((Action)(() => {
+                        try
+                        {
+                            AddNewBrowserTab("https://www.google.com");
+                        }
+                        finally
+                        {
+                            isAddingTab = false;
+                        }
+                    }));
                 }
             };
 
@@ -761,16 +775,20 @@ namespace PrivateViewerApp
             }
         }
 
-        private async Task EnsureSharedEnvAsync()
+        private static Task<CoreWebView2Environment> GetSharedEnvAsync()
         {
-            if (sharedEnv == null)
+            lock (envLock)
             {
-                string dataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "PrivateViewer", "WebView2Profile"
-                );
-                Directory.CreateDirectory(dataFolder);
-                sharedEnv = await CoreWebView2Environment.CreateAsync(null, dataFolder, null);
+                if (envInitTask == null)
+                {
+                    string dataFolder = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "PrivateViewer", "WebView2Profile"
+                    );
+                    Directory.CreateDirectory(dataFolder);
+                    envInitTask = CoreWebView2Environment.CreateAsync(null, dataFolder, null);
+                }
+                return envInitTask;
             }
         }
 
@@ -914,8 +932,16 @@ namespace PrivateViewerApp
 
             try
             {
-                await EnsureSharedEnvAsync();
-                await webView.EnsureCoreWebView2Async(sharedEnv);
+                await wvInitSemaphore.WaitAsync();
+                try
+                {
+                    sharedEnv = await GetSharedEnvAsync();
+                    await webView.EnsureCoreWebView2Async(sharedEnv);
+                }
+                finally
+                {
+                    wvInitSemaphore.Release();
+                }
 
                 webView.NavigationStarting += (s, e) => {
                     isTabLoading = true;
@@ -940,6 +966,15 @@ namespace PrivateViewerApp
 
                 if (webView.CoreWebView2 != null)
                 {
+                    // Apri link esterni o target="_blank" in nuove schede anziché bloccare o crashare
+                    webView.CoreWebView2.NewWindowRequested += (s, args) => {
+                        args.Handled = true;
+                        if (!string.IsNullOrEmpty(args.Uri))
+                        {
+                            this.BeginInvoke((Action)(() => AddNewBrowserTab(args.Uri)));
+                        }
+                    };
+
                     webView.CoreWebView2.DocumentTitleChanged += (s, e) => {
                         string title = webView.CoreWebView2.DocumentTitle;
                         if (!string.IsNullOrWhiteSpace(title))
