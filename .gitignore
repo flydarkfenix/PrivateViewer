@@ -13,3 +13,8 @@
 WebView2Profile/
 *.tmp
 *.log
+
+# Agent files
+AGENT_TASKS.md
+AGENT_LOOP_PROMPT.md
+
