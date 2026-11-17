@@ -136,6 +136,7 @@ namespace PrivateViewerApp
             this.ForeColor = Color.White;
             this.KeyPreview = true;
             this.AllowDrop = true;
+            this.Opacity = 0.10; // Avvio con 90% trasparenza (10% opacità)
 
             // Nascondi dalla barra delle applicazioni Windows (Stealth Mode)
             this.ShowInTaskbar = false;
@@ -164,24 +165,29 @@ namespace PrivateViewerApp
 
             pnlOpacity = new Panel();
             pnlOpacity.Dock = DockStyle.Right;
-            pnlOpacity.Width = 175;
-            pnlOpacity.BackColor = Color.Transparent;
+            pnlOpacity.Width = 195;
+            pnlOpacity.BackColor = Color.FromArgb(50, 50, 50);
+            pnlOpacity.BorderStyle = BorderStyle.FixedSingle;
 
             lblOpacity = new Label();
-            lblOpacity.Text = "Opacità:";
-            lblOpacity.ForeColor = Color.LightGray;
-            lblOpacity.Font = new Font("Segoe UI", 9);
+            lblOpacity.Text = "Opacità: 10%";
+            lblOpacity.ForeColor = Color.FromArgb(0, 220, 255);
+            lblOpacity.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
             lblOpacity.AutoSize = true;
-            lblOpacity.Location = new Point(4, 12);
+            lblOpacity.Location = new Point(4, 10);
 
             tbOpacity = new TrackBar();
-            tbOpacity.Minimum = 30;
+            tbOpacity.Minimum = 10;
             tbOpacity.Maximum = 100;
-            tbOpacity.Value = 100;
+            tbOpacity.Value = 10;
             tbOpacity.TickStyle = TickStyle.None;
-            tbOpacity.Size = new Size(105, 30);
-            tbOpacity.Location = new Point(62, 8);
-            tbOpacity.Scroll += (s, e) => { this.Opacity = tbOpacity.Value / 100.0; };
+            tbOpacity.Size = new Size(100, 30);
+            tbOpacity.Location = new Point(88, 6);
+            tbOpacity.BackColor = Color.FromArgb(40, 40, 40);
+            tbOpacity.Scroll += (s, e) => {
+                this.Opacity = tbOpacity.Value / 100.0;
+                lblOpacity.Text = string.Format("Opacità: {0}%", tbOpacity.Value);
+            };
 
             pnlOpacity.Controls.Add(lblOpacity);
             pnlOpacity.Controls.Add(tbOpacity);
@@ -274,7 +280,7 @@ namespace PrivateViewerApp
             toolTip.SetToolTip(btnRestoreMenu, "Riapre la barra superiore dei comandi (Ctrl + M)");
 
             lblMiniShortcuts = new Label();
-            lblMiniShortcuts.Text = "💡 [Ctrl+M] Mostra Barra | [F11] Schermo Intero | [ESC] Boss Key";
+            lblMiniShortcuts.Text = "💡 [Ctrl+M] Mostra Barra | [Ctrl+↑/↓] Opacità | [F11] Schermo Intero | [ESC] Boss Key";
             lblMiniShortcuts.Font = new Font("Segoe UI", 8.5f);
             lblMiniShortcuts.ForeColor = Color.DarkGray;
             lblMiniShortcuts.Dock = DockStyle.Right;
@@ -1121,6 +1127,22 @@ namespace PrivateViewerApp
                     else if (key == Keys.W)
                     {
                         CloseCurrentBrowserTab();
+                        return true;
+                    }
+                    else if (key == Keys.Up || key == Keys.Add || key == Keys.Oemplus)
+                    {
+                        int newVal = Math.Min(100, tbOpacity.Value + 5);
+                        tbOpacity.Value = newVal;
+                        this.Opacity = newVal / 100.0;
+                        lblOpacity.Text = string.Format("Opacità: {0}%", newVal);
+                        return true;
+                    }
+                    else if (key == Keys.Down || key == Keys.Subtract || key == Keys.OemMinus)
+                    {
+                        int newVal = Math.Max(tbOpacity.Minimum, tbOpacity.Value - 5);
+                        tbOpacity.Value = newVal;
+                        this.Opacity = newVal / 100.0;
+                        lblOpacity.Text = string.Format("Opacità: {0}%", newVal);
                         return true;
                     }
                     else if (key == Keys.Tab)
