@@ -62,6 +62,15 @@ namespace PrivateViewerApp
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern uint RegisterWindowMessage(string lpString);
+
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        private static uint WM_SHOW_FIRST_INSTANCE;
+        private static System.Threading.Mutex singleMutex;
+
         // Core WebView2 Shared Environment & Concurrency Controls
         private static CoreWebView2Environment sharedEnv;
         private static Task<CoreWebView2Environment> envInitTask;
@@ -129,9 +138,22 @@ namespace PrivateViewerApp
         [STAThread]
         public static void Main()
         {
+            WM_SHOW_FIRST_INSTANCE = RegisterWindowMessage("WM_SHOW_PRIVATEVIEWER_FLY");
+            bool createdNew;
+            singleMutex = new System.Threading.Mutex(true, "Local\\PrivateViewer_Fly_SingleInstance", out createdNew);
+
+            if (!createdNew)
+            {
+                // Se un'istanza è già aperta, invia un messaggio broadcast per svegliarla ed esci silenziosamente
+                PostMessage((IntPtr)0xffff, WM_SHOW_FIRST_INSTANCE, IntPtr.Zero, IntPtr.Zero);
+                return;
+            }
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new MainForm());
+
+            GC.KeepAlive(singleMutex);
         }
 
         public MainForm()
@@ -151,8 +173,8 @@ namespace PrivateViewerApp
             this.AllowDrop = true;
             this.Opacity = 0.10; // Avvio con 90% trasparenza (10% opacità)
 
-            // Nascondi dalla barra delle applicazioni Windows (Stealth Mode)
-            this.ShowInTaskbar = false;
+            // Mostra nella barra delle applicazioni (disattivabile con la casella Stealth)
+            this.ShowInTaskbar = true;
 
             toolTip = new ToolTip();
             toolTip.AutoPopDelay = 4000;
@@ -293,7 +315,7 @@ namespace PrivateViewerApp
             chkHideTaskbar.ForeColor = Color.YellowGreen;
             chkHideTaskbar.Font = new Font("Segoe UI", 9, FontStyle.Bold);
             chkHideTaskbar.AutoSize = true;
-            chkHideTaskbar.Checked = true;
+            chkHideTaskbar.Checked = false;
             chkHideTaskbar.Margin = new Padding(6, 8, 6, 4);
             chkHideTaskbar.CheckedChanged += (s, e) => {
                 this.ShowInTaskbar = !chkHideTaskbar.Checked;
@@ -905,15 +927,41 @@ namespace PrivateViewerApp
             {
                 if (envInitTask == null)
                 {
-                    string dataFolder = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "PrivateViewer", "WebView2Profile"
-                    );
-                    Directory.CreateDirectory(dataFolder);
-                    envInitTask = CoreWebView2Environment.CreateAsync(null, dataFolder, null);
+                    envInitTask = InitEnvironmentAsync();
                 }
                 return envInitTask;
             }
+        }
+
+        private static async Task<CoreWebView2Environment> InitEnvironmentAsync()
+        {
+            string baseFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PrivateViewer"
+            );
+            string primaryFolder = Path.Combine(baseFolder, "WebView2Profile");
+            Directory.CreateDirectory(primaryFolder);
+
+            Exception primaryEx = null;
+            CoreWebView2Environment env = null;
+            try
+            {
+                env = await CoreWebView2Environment.CreateAsync(null, primaryFolder, null);
+            }
+            catch (Exception ex)
+            {
+                primaryEx = ex;
+            }
+
+            if (primaryEx != null)
+            {
+                // Se la cartella principale è bloccata o in uso da un'altra istanza, fallback sicuro su profilo isolato per questo processo
+                string fallbackFolder = Path.Combine(baseFolder, "WebView2Profile_" + Process.GetCurrentProcess().Id);
+                Directory.CreateDirectory(fallbackFolder);
+                env = await CoreWebView2Environment.CreateAsync(null, fallbackFolder, null);
+            }
+
+            return env;
         }
 
         // ==============================================================================
@@ -1381,6 +1429,20 @@ namespace PrivateViewerApp
                 trayIcon.Dispose();
             }
             base.OnFormClosing(e);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (WM_SHOW_FIRST_INSTANCE != 0 && (uint)m.Msg == WM_SHOW_FIRST_INSTANCE)
+            {
+                RestoreWindow();
+                this.WindowState = FormWindowState.Normal;
+                this.BringToFront();
+                this.Activate();
+                SetForegroundWindow(this.Handle);
+                return;
+            }
+            base.WndProc(ref m);
         }
     }
 }
