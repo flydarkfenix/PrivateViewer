@@ -83,10 +83,13 @@ namespace PrivateViewerApp
         private TrackBar tbOpacity;
         private Label lblOpacity;
 
-        // Mini Mode State
+        // Mini Mode State & Slider
         private bool isMiniMode = false;
         private Size prevNormalSize = new Size(1040, 700);
         private Point prevNormalLocation;
+        private Panel pnlMiniSize;
+        private TrackBar tbMiniSize;
+        private Label lblMiniSize;
 
         // Mini bar visibile quando la barra superiore è nascosta
         private Panel pnlMiniBar;
@@ -239,6 +242,44 @@ namespace PrivateViewerApp
             btnMiniMode = CreateToolbarButton("🔍 Minuscola", 100, 28, Color.FromArgb(48, 48, 48), "Riduci la schermata a finestra minuscola / compatta (Ctrl + Shift + M)");
             btnMiniMode.Click += (s, e) => { ToggleMiniMode(); };
 
+            pnlMiniSize = new Panel();
+            pnlMiniSize.Width = 175;
+            pnlMiniSize.Height = 28;
+            pnlMiniSize.Margin = new Padding(4, 4, 4, 4);
+            pnlMiniSize.BackColor = Color.FromArgb(48, 48, 48);
+            pnlMiniSize.BorderStyle = BorderStyle.FixedSingle;
+            pnlMiniSize.Visible = false;
+
+            lblMiniSize = new Label();
+            lblMiniSize.Text = "Dim: 320";
+            lblMiniSize.ForeColor = Color.FromArgb(255, 185, 0);
+            lblMiniSize.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+            lblMiniSize.AutoSize = true;
+            lblMiniSize.Location = new Point(4, 5);
+
+            tbMiniSize = new TrackBar();
+            tbMiniSize.Minimum = 200;
+            tbMiniSize.Maximum = 700;
+            tbMiniSize.Value = 320;
+            tbMiniSize.TickStyle = TickStyle.None;
+            tbMiniSize.Size = new Size(100, 26);
+            tbMiniSize.Location = new Point(68, 1);
+            tbMiniSize.BackColor = Color.FromArgb(40, 40, 40);
+            tbMiniSize.Scroll += (s, e) => {
+                if (isMiniMode)
+                {
+                    int w = tbMiniSize.Value;
+                    int h = (int)(w * 0.625);
+                    this.Size = new Size(w, h);
+                    Rectangle workingArea = Screen.FromControl(this).WorkingArea;
+                    this.Location = new Point(workingArea.Right - w - 15, workingArea.Bottom - h - 15);
+                    lblMiniSize.Text = string.Format("Dim: {0}", w);
+                }
+            };
+
+            pnlMiniSize.Controls.Add(lblMiniSize);
+            pnlMiniSize.Controls.Add(tbMiniSize);
+
             chkAlwaysOnTop = new CheckBox();
             chkAlwaysOnTop.Text = "Sempre in primo";
             chkAlwaysOnTop.ForeColor = Color.LightGray;
@@ -264,6 +305,7 @@ namespace PrivateViewerApp
             flowTopLeft.Controls.Add(btnOpenFile);
             flowTopLeft.Controls.Add(btnToggleMenu);
             flowTopLeft.Controls.Add(btnMiniMode);
+            flowTopLeft.Controls.Add(pnlMiniSize);
             flowTopLeft.Controls.Add(chkAlwaysOnTop);
             flowTopLeft.Controls.Add(chkHideTaskbar);
 
@@ -732,13 +774,25 @@ namespace PrivateViewerApp
                 prevNormalLocation = this.Location;
 
                 this.MinimumSize = new Size(180, 120);
-                this.Size = new Size(320, 200);
+                int targetW = tbMiniSize != null ? tbMiniSize.Value : 320;
+                int targetH = (int)(targetW * 0.625);
+                this.Size = new Size(targetW, targetH);
 
                 // Posiziona in basso a destra sopra l'area di lavoro
                 Rectangle workingArea = Screen.FromControl(this).WorkingArea;
-                this.Location = new Point(workingArea.Right - 335, workingArea.Bottom - 215);
+                this.Location = new Point(workingArea.Right - targetW - 15, workingArea.Bottom - targetH - 15);
 
                 isMiniMode = true;
+
+                // Mostra slider di ridimensionamento e nascondi pulsanti ingombranti
+                if (lblTitle != null) lblTitle.Visible = false;
+                if (btnToggleAffinity != null) btnToggleAffinity.Visible = false;
+                if (btnOpenFile != null) btnOpenFile.Visible = false;
+                if (btnToggleMenu != null) btnToggleMenu.Visible = false;
+                if (chkAlwaysOnTop != null) chkAlwaysOnTop.Visible = false;
+                if (chkHideTaskbar != null) chkHideTaskbar.Visible = false;
+                if (pnlMiniSize != null) pnlMiniSize.Visible = true;
+
                 if (btnMiniMode != null)
                 {
                     btnMiniMode.Text = "🔍 Ingrandisci";
@@ -749,6 +803,14 @@ namespace PrivateViewerApp
             else
             {
                 isMiniMode = false;
+                if (pnlMiniSize != null) pnlMiniSize.Visible = false;
+                if (lblTitle != null) lblTitle.Visible = true;
+                if (btnToggleAffinity != null) btnToggleAffinity.Visible = true;
+                if (btnOpenFile != null) btnOpenFile.Visible = true;
+                if (btnToggleMenu != null) btnToggleMenu.Visible = true;
+                if (chkAlwaysOnTop != null) chkAlwaysOnTop.Visible = true;
+                if (chkHideTaskbar != null) chkHideTaskbar.Visible = true;
+
                 this.MinimumSize = new Size(540, 360);
                 this.Size = prevNormalSize;
                 if (prevNormalLocation.X >= 0 && prevNormalLocation.Y >= 0)
@@ -1181,6 +1243,12 @@ namespace PrivateViewerApp
             if (this.WindowState == FormWindowState.Minimized)
             {
                 this.Hide();
+            }
+            if (isMiniMode && tbMiniSize != null && this.WindowState == FormWindowState.Normal)
+            {
+                int clamped = Math.Max(tbMiniSize.Minimum, Math.Min(tbMiniSize.Maximum, this.Width));
+                tbMiniSize.Value = clamped;
+                lblMiniSize.Text = string.Format("Dim: {0}", clamped);
             }
         }
 
