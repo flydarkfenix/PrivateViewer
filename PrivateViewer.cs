@@ -76,11 +76,17 @@ namespace PrivateViewerApp
         private Button btnToggleAffinity;
         private Button btnOpenFile;
         private Button btnToggleMenu;
+        private Button btnMiniMode;
         private CheckBox chkAlwaysOnTop;
         private CheckBox chkHideTaskbar;
         private Panel pnlOpacity;
         private TrackBar tbOpacity;
         private Label lblOpacity;
+
+        // Mini Mode State
+        private bool isMiniMode = false;
+        private Size prevNormalSize = new Size(1040, 700);
+        private Point prevNormalLocation;
 
         // Mini bar visibile quando la barra superiore è nascosta
         private Panel pnlMiniBar;
@@ -230,6 +236,9 @@ namespace PrivateViewerApp
             btnToggleMenu = CreateToolbarButton("▲ Nascondi Barra", 120, 28, Color.FromArgb(48, 48, 48), "Nascondi questa barra per vedere solo le schede e pagine (Ctrl + M)");
             btnToggleMenu.Click += (s, e) => { ToggleMenuVisibility(); };
 
+            btnMiniMode = CreateToolbarButton("🔍 Minuscola", 100, 28, Color.FromArgb(48, 48, 48), "Riduci la schermata a finestra minuscola / compatta (Ctrl + Shift + M)");
+            btnMiniMode.Click += (s, e) => { ToggleMiniMode(); };
+
             chkAlwaysOnTop = new CheckBox();
             chkAlwaysOnTop.Text = "Sempre in primo";
             chkAlwaysOnTop.ForeColor = Color.LightGray;
@@ -254,6 +263,7 @@ namespace PrivateViewerApp
             flowTopLeft.Controls.Add(btnToggleAffinity);
             flowTopLeft.Controls.Add(btnOpenFile);
             flowTopLeft.Controls.Add(btnToggleMenu);
+            flowTopLeft.Controls.Add(btnMiniMode);
             flowTopLeft.Controls.Add(chkAlwaysOnTop);
             flowTopLeft.Controls.Add(chkHideTaskbar);
 
@@ -284,7 +294,7 @@ namespace PrivateViewerApp
             toolTip.SetToolTip(btnRestoreMenu, "Riapre la barra superiore dei comandi (Ctrl + M)");
 
             lblMiniShortcuts = new Label();
-            lblMiniShortcuts.Text = "💡 [Ctrl+M] Mostra Barra | [Ctrl+↑/↓] Opacità | [F11] Schermo Intero | [ESC] Boss Key";
+            lblMiniShortcuts.Text = "💡 [Ctrl+M] Barra | [Ctrl+Shift+M] Minuscola | [Ctrl+↑/↓] Opacità | [F11] Schermo Intero | [ESC] Boss Key";
             lblMiniShortcuts.Font = new Font("Segoe UI", 8.5f);
             lblMiniShortcuts.ForeColor = Color.DarkGray;
             lblMiniShortcuts.Dock = DockStyle.Right;
@@ -706,6 +716,54 @@ namespace PrivateViewerApp
             }
         }
 
+        public void ToggleMiniMode()
+        {
+            if (!isMiniMode)
+            {
+                if (isFullScreen)
+                {
+                    ToggleFullScreen();
+                }
+                if (this.WindowState == FormWindowState.Maximized)
+                {
+                    this.WindowState = FormWindowState.Normal;
+                }
+                prevNormalSize = this.Size;
+                prevNormalLocation = this.Location;
+
+                this.MinimumSize = new Size(180, 120);
+                this.Size = new Size(320, 200);
+
+                // Posiziona in basso a destra sopra l'area di lavoro
+                Rectangle workingArea = Screen.FromControl(this).WorkingArea;
+                this.Location = new Point(workingArea.Right - 335, workingArea.Bottom - 215);
+
+                isMiniMode = true;
+                if (btnMiniMode != null)
+                {
+                    btnMiniMode.Text = "🔍 Ingrandisci";
+                    btnMiniMode.BackColor = Color.FromArgb(180, 90, 0);
+                    toolTip.SetToolTip(btnMiniMode, "Ripristina le dimensioni normali (Ctrl + Shift + M)");
+                }
+            }
+            else
+            {
+                isMiniMode = false;
+                this.MinimumSize = new Size(540, 360);
+                this.Size = prevNormalSize;
+                if (prevNormalLocation.X >= 0 && prevNormalLocation.Y >= 0)
+                {
+                    this.Location = prevNormalLocation;
+                }
+                if (btnMiniMode != null)
+                {
+                    btnMiniMode.Text = "🔍 Minuscola";
+                    btnMiniMode.BackColor = Color.FromArgb(48, 48, 48);
+                    toolTip.SetToolTip(btnMiniMode, "Riduci la schermata a finestra minuscola (Ctrl + Shift + M)");
+                }
+            }
+        }
+
         private void SetupTrayIcon()
         {
             trayMenu = new ContextMenuStrip();
@@ -713,6 +771,10 @@ namespace PrivateViewerApp
             itemShow.Font = new Font(trayMenu.Font, FontStyle.Bold);
             trayMenu.Items.Add("Nascondi nella Tray (Boss Key)", null, (s, e) => HideToTray());
             trayMenu.Items.Add(new ToolStripSeparator());
+            trayMenu.Items.Add("Schermata Minuscola On/Off (Ctrl+Shift+M)", null, (s, e) => {
+                RestoreWindow();
+                ToggleMiniMode();
+            });
             trayMenu.Items.Add("Mostra/Nascondi Barra (Ctrl+M)", null, (s, e) => {
                 RestoreWindow();
                 ToggleMenuVisibility();
@@ -1146,12 +1208,20 @@ namespace PrivateViewerApp
                 }
 
                 bool ctrlPressed = (Control.ModifierKeys & Keys.Control) == Keys.Control;
+                bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
                 if (ctrlPressed)
                 {
-                    // Ctrl + M: Mostra/Nascondi Barra (Zen Mode)
+                    // Ctrl + Shift + M: Schermata Minuscola On/Off | Ctrl + M: Mostra/Nascondi Barra (Zen Mode)
                     if (key == Keys.M)
                     {
-                        ToggleMenuVisibility();
+                        if (shiftPressed)
+                        {
+                            ToggleMiniMode();
+                        }
+                        else
+                        {
+                            ToggleMenuVisibility();
+                        }
                         return true;
                     }
                     else if (key == Keys.T)
@@ -1209,6 +1279,11 @@ namespace PrivateViewerApp
             if (keyData == Keys.F11)
             {
                 ToggleFullScreen();
+                return true;
+            }
+            if (keyData == (Keys.Control | Keys.Shift | Keys.M))
+            {
+                ToggleMiniMode();
                 return true;
             }
             if (keyData == (Keys.Control | Keys.M) || keyData == Keys.F1)
