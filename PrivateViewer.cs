@@ -77,6 +77,7 @@ namespace PrivateViewerApp
         private static readonly object envLock = new object();
         private static readonly System.Threading.SemaphoreSlim wvInitSemaphore = new System.Threading.SemaphoreSlim(1, 1);
         private bool isAddingTab = false;
+        private static string activeSessionFolder;
 
         // Top Control Panel (Unico, pulito e compatto)
         private Panel topPanel;
@@ -151,6 +152,8 @@ namespace PrivateViewerApp
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            CleanOrphanedTempSessions();
+            AppDomain.CurrentDomain.ProcessExit += (s, e) => { CleanupSessionFolder(); };
             Application.Run(new MainForm());
 
             GC.KeepAlive(singleMutex);
@@ -935,18 +938,17 @@ namespace PrivateViewerApp
 
         private static async Task<CoreWebView2Environment> InitEnvironmentAsync()
         {
-            string baseFolder = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "PrivateViewer"
-            );
-            string primaryFolder = Path.Combine(baseFolder, "WebView2Profile");
-            Directory.CreateDirectory(primaryFolder);
+            // Crea una cartella di sessione volatile e temporanea dedicata a questa singola esecuzione
+            string tempRoot = Path.GetTempPath();
+            string sessionFolder = Path.Combine(tempRoot, "PV_TempSession_" + Process.GetCurrentProcess().Id + "_" + Guid.NewGuid().ToString("N").Substring(0, 8));
+            Directory.CreateDirectory(sessionFolder);
+            activeSessionFolder = sessionFolder;
 
             Exception primaryEx = null;
             CoreWebView2Environment env = null;
             try
             {
-                env = await CoreWebView2Environment.CreateAsync(null, primaryFolder, null);
+                env = await CoreWebView2Environment.CreateAsync(null, sessionFolder, null);
             }
             catch (Exception ex)
             {
@@ -955,9 +957,10 @@ namespace PrivateViewerApp
 
             if (primaryEx != null)
             {
-                // Se la cartella principale è bloccata o in uso da un'altra istanza, fallback sicuro su profilo isolato per questo processo
-                string fallbackFolder = Path.Combine(baseFolder, "WebView2Profile_" + Process.GetCurrentProcess().Id);
+                // Fallback sicuro con ID di processo
+                string fallbackFolder = Path.Combine(tempRoot, "PV_TempSession_Fallback_" + Process.GetCurrentProcess().Id);
                 Directory.CreateDirectory(fallbackFolder);
+                activeSessionFolder = fallbackFolder;
                 env = await CoreWebView2Environment.CreateAsync(null, fallbackFolder, null);
             }
 
@@ -1138,6 +1141,10 @@ namespace PrivateViewerApp
 
                 if (webView.CoreWebView2 != null)
                 {
+                    // Disattiva salvataggio password, autofill e dati persistenti
+                    webView.CoreWebView2.Settings.IsPasswordAutosaveEnabled = false;
+                    webView.CoreWebView2.Settings.IsGeneralAutofillEnabled = false;
+
                     // Apri link esterni o target="_blank" in nuove schede anziché bloccare o crashare
                     webView.CoreWebView2.NewWindowRequested += (s, args) => {
                         args.Handled = true;
@@ -1428,7 +1435,95 @@ namespace PrivateViewerApp
                 trayIcon.Visible = false;
                 trayIcon.Dispose();
             }
+
+            // Svuota la clipboard per eliminare eventuali frammenti di testo o credenziali copiate
+            try { Clipboard.Clear(); } catch { }
+
+            // Rilascia e distruggi tutti i controlli WebView2
+            try
+            {
+                foreach (TabPage tab in tabControl.TabPages)
+                {
+                    foreach (Control c in tab.Controls)
+                    {
+                        if (c is WebView2)
+                        {
+                            try { ((WebView2)c).Dispose(); } catch { }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // Cancellazione e distruzione totale della cartella della sessione
+            CleanupSessionFolder();
+
             base.OnFormClosing(e);
+        }
+
+        private static void CleanupSessionFolder()
+        {
+            if (string.IsNullOrEmpty(activeSessionFolder)) return;
+
+            // 1. Tenta la cancellazione immediata in-process
+            try
+            {
+                if (Directory.Exists(activeSessionFolder))
+                {
+                    Directory.Delete(activeSessionFolder, true);
+                }
+            }
+            catch
+            {
+                // 2. Se WebView2 sta ancora rilasciando i file aperti, avvia un worker nascosto ritardato di 1s che elimina la cartella
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo();
+                    psi.FileName = "cmd.exe";
+                    psi.Arguments = string.Format("/c ping 127.0.0.1 -n 2 > nul & rd /s /q \"{0}\"", activeSessionFolder);
+                    psi.WindowStyle = ProcessWindowStyle.Hidden;
+                    psi.CreateNoWindow = true;
+                    psi.UseShellExecute = false;
+                    Process.Start(psi);
+                }
+                catch { }
+            }
+
+            // 3. Rimuovi anche l'eventuale vecchia cartella residua in LocalAppData
+            try
+            {
+                string oldAppData = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "PrivateViewer"
+                );
+                if (Directory.Exists(oldAppData))
+                {
+                    Directory.Delete(oldAppData, true);
+                }
+            }
+            catch { }
+        }
+
+        private static void CleanOrphanedTempSessions()
+        {
+            try
+            {
+                string tempDir = Path.GetTempPath();
+                foreach (string dir in Directory.GetDirectories(tempDir, "PV_TempSession_*"))
+                {
+                    try { Directory.Delete(dir, true); } catch { }
+                }
+
+                string oldAppData = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "PrivateViewer"
+                );
+                if (Directory.Exists(oldAppData))
+                {
+                    Directory.Delete(oldAppData, true);
+                }
+            }
+            catch { }
         }
 
         protected override void WndProc(ref Message m)
