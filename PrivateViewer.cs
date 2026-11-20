@@ -72,6 +72,9 @@ namespace PrivateViewerApp
         [DllImport("user32.dll")]
         private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
+        [DllImport("user32.dll")]
+        private static extern bool SetProcessDPIAware();
+
         private static uint WM_SHOW_FIRST_INSTANCE;
         private static System.Threading.Mutex singleMutex;
 
@@ -154,6 +157,7 @@ namespace PrivateViewerApp
                 return;
             }
 
+            try { SetProcessDPIAware(); } catch { }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             CleanOrphanedTempSessions();
@@ -461,7 +465,7 @@ namespace PrivateViewerApp
             txtNotes.Text = "// =============================================================================\r\n" +
                             "// PrivateViewer (Clean & Streamlined Edition)\r\n" +
                             "// Ideato e creato da: Alex Ponzin (@Ilponz)\r\n" +
-                            "// Repository: https://github.com/Ilponz/PrivateViewer\r\n" +
+                            "// Repository: " + REPO_URL + "\r\n" +
                             "// =============================================================================\r\n" +
                             "// • Trascina le schede per riordinarle come in un vero browser\r\n" +
                             "// • Fai clic con la rotellina (tasto centrale) su una scheda per chiuderla\r\n" +
@@ -1154,11 +1158,84 @@ namespace PrivateViewerApp
                     }
                 };
 
+                webView.KeyDown += (s, e) => {
+                    bool ctrl = (Control.ModifierKeys & Keys.Control) == Keys.Control;
+                    bool shift = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+
+                    if (e.KeyCode == Keys.Escape)
+                    {
+                        HideToTray();
+                        e.Handled = true;
+                    }
+                    else if (e.KeyCode == Keys.F11)
+                    {
+                        ToggleFullScreen();
+                        e.Handled = true;
+                    }
+                    else if (ctrl && shift && e.KeyCode == Keys.M)
+                    {
+                        ToggleMiniMode();
+                        e.Handled = true;
+                    }
+                    else if (ctrl && e.KeyCode == Keys.M)
+                    {
+                        ToggleMenuVisibility();
+                        e.Handled = true;
+                    }
+                    else if (ctrl && e.KeyCode == Keys.T)
+                    {
+                        AddNewBrowserTab("https://www.google.com");
+                        e.Handled = true;
+                    }
+                    else if (ctrl && e.KeyCode == Keys.W)
+                    {
+                        CloseCurrentBrowserTab();
+                        e.Handled = true;
+                    }
+                    else if (ctrl && (e.KeyCode == Keys.Up || e.KeyCode == Keys.Add || e.KeyCode == Keys.Oemplus))
+                    {
+                        int newVal = Math.Min(100, tbOpacity.Value + 5);
+                        tbOpacity.Value = newVal;
+                        this.Opacity = newVal / 100.0;
+                        lblOpacity.Text = string.Format("Opacità: {0}%", newVal);
+                        e.Handled = true;
+                    }
+                    else if (ctrl && (e.KeyCode == Keys.Down || e.KeyCode == Keys.Subtract || e.KeyCode == Keys.OemMinus))
+                    {
+                        int newVal = Math.Max(tbOpacity.Minimum, tbOpacity.Value - 5);
+                        tbOpacity.Value = newVal;
+                        this.Opacity = newVal / 100.0;
+                        lblOpacity.Text = string.Format("Opacità: {0}%", newVal);
+                        e.Handled = true;
+                    }
+                };
+
                 if (webView.CoreWebView2 != null)
                 {
                     // Disattiva salvataggio password, autofill e dati persistenti
                     webView.CoreWebView2.Settings.IsPasswordAutosaveEnabled = false;
                     webView.CoreWebView2.Settings.IsGeneralAutofillEnabled = false;
+
+                    // Script DOM globale per catturare ESC in qualsiasi punto della pagina web e nascondere immediatamente l'app
+                    await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(@"
+                        window.addEventListener('keydown', function(e) {
+                            if (e.key === 'Escape' || e.keyCode === 27) {
+                                window.chrome.webview.postMessage('BOSS_KEY_ESC');
+                            }
+                        }, true);
+                    ");
+
+                    webView.CoreWebView2.WebMessageReceived += (s, args) => {
+                        try
+                        {
+                            string msg = args.TryGetWebMessageAsString();
+                            if (msg == "BOSS_KEY_ESC")
+                            {
+                                this.BeginInvoke((Action)(() => HideToTray()));
+                            }
+                        }
+                        catch { }
+                    };
 
                     // Apri link esterni o target="_blank" in nuove schede anziché bloccare o crashare
                     webView.CoreWebView2.NewWindowRequested += (s, args) => {
@@ -1182,7 +1259,16 @@ namespace PrivateViewerApp
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Errore caricamento WebView2: " + ex.Message, "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // Nessun popup rumoroso a schermo intero: mostra un messaggio sobrio direttamente nella scheda
+                Label lblErr = new Label();
+                lblErr.Dock = DockStyle.Fill;
+                lblErr.BackColor = Color.FromArgb(20, 20, 20);
+                lblErr.ForeColor = Color.OrangeRed;
+                lblErr.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+                lblErr.TextAlign = ContentAlignment.MiddleCenter;
+                lblErr.Text = "⚠️ Impossibile inizializzare WebView2 su questo PC.\r\n" + ex.Message;
+                tabPage.Controls.Add(lblErr);
+                lblErr.BringToFront();
             }
         }
 
