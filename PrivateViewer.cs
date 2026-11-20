@@ -13,14 +13,14 @@ using Microsoft.Web.WebView2.WinForms;
 // ==============================================================================
 // METADATI UFFICIALI E FIRMA INDELEBILE DELL'AUTORE (Proprietà file .EXE Windows)
 // ==============================================================================
-[assembly: AssemblyTitle("PrivateViewer (Clean & Streamlined Edition)")]
-[assembly: AssemblyDescription("Created by Alex Ponzin (@Ilponz) - Anti-Capture Multi-Tab Protected Workspace")]
+[assembly: AssemblyTitle("PrivateViewer (Stealth & School Edition)")]
+[assembly: AssemblyDescription("Created by Alex Ponzin (@Ilponz) - Anti-Capture Multi-Tab Protected Workspace with AdBlock, DarkMode & Click-Through")]
 [assembly: AssemblyCompany("Alex Ponzin (Ilponz)")]
 [assembly: AssemblyProduct("PrivateViewer")]
 [assembly: AssemblyCopyright("Copyright © 2026 Alex Ponzin (@Ilponz). All rights reserved.")]
 [assembly: AssemblyTrademark("Original Software by Alex Ponzin")]
-[assembly: AssemblyVersion("2.5.0.0")]
-[assembly: AssemblyFileVersion("2.5.0.0")]
+[assembly: AssemblyVersion("2.7.0.0")]
+[assembly: AssemblyFileVersion("2.7.0.0")]
 
 namespace PrivateViewerApp
 {
@@ -44,6 +44,23 @@ namespace PrivateViewerApp
         private const int SW_SHOWNORMAL = 1;
         private const int SW_SHOW = 5;
         private const int SW_RESTORE = 9;
+
+        // Window Styles per Click-Through (trasparenza completa al cursore del mouse)
+        private const int GWL_EXSTYLE = -20;
+        private const int WS_EX_TRANSPARENT = 0x00000020;
+        private const int WS_EX_LAYERED = 0x00080000;
+
+        // Global Hotkeys Win32 (funzionanti anche quando la finestra non ha il focus o è in click-through)
+        private const int WM_HOTKEY = 0x0312;
+        private const uint MOD_ALT = 0x0001;
+        private const uint MOD_CONTROL = 0x0002;
+        private const uint MOD_SHIFT = 0x0004;
+        private const uint MOD_WIN = 0x0008;
+
+        private const int HOTKEY_CLICKTHROUGH_CTRL_SHIFT_X = 9001;
+        private const int HOTKEY_CLICKTHROUGH_F8 = 9002;
+        private const int HOTKEY_PANIC_CTRL_SHIFT_Q = 9003;
+        private const int HOTKEY_PANIC_F12 = 9004;
 
         // DWM Attributes per Dark Title Bar nativo Windows
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
@@ -75,6 +92,95 @@ namespace PrivateViewerApp
         [DllImport("user32.dll")]
         private static extern bool SetProcessDPIAware();
 
+        [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+        private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+        private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
+        private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+        private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+        private static int GetWindowExStyle(IntPtr hWnd)
+        {
+            if (IntPtr.Size == 8)
+                return unchecked((int)GetWindowLongPtr64(hWnd, GWL_EXSTYLE).ToInt64());
+            else
+                return GetWindowLong32(hWnd, GWL_EXSTYLE);
+        }
+
+        private static void SetWindowExStyle(IntPtr hWnd, int newExStyle)
+        {
+            if (IntPtr.Size == 8)
+                SetWindowLongPtr64(hWnd, GWL_EXSTYLE, new IntPtr(newExStyle));
+            else
+                SetWindowLong32(hWnd, GWL_EXSTYLE, newExStyle);
+        }
+
+        // Domini e percorsi per Blocco Ad & Tracker integrato
+        private static readonly string[] AdTrackerDomains = new string[] {
+            "doubleclick.net",
+            "googlesyndication.com",
+            "adservice.google.com",
+            "google-analytics.com",
+            "googletagmanager.com",
+            "criteo.com",
+            "criteo.net",
+            "outbrain.com",
+            "taboola.com",
+            "adnxs.com",
+            "amazon-adsystem.com",
+            "scorecardresearch.com",
+            "quantserve.com",
+            "adroll.com",
+            "popads.net",
+            "propellerads.com",
+            "moatads.com",
+            "smartadserver.com",
+            "pubmatic.com",
+            "openx.net",
+            "rubiconproject.com",
+            "zedo.com",
+            "serving-sys.com",
+            "adcolony.com",
+            "flashtalking.com",
+            "yieldmo.com",
+            "casalemedia.com",
+            "indexexchange.com",
+            "applovin.com",
+            "vungle.com",
+            "unityads.unity3d.com",
+            "chartboost.com",
+            "advertising.com",
+            "hotjar.com",
+            "clarity.ms",
+            "yandex.ru/metrika",
+            "mc.yandex.ru"
+        };
+
+        private static bool IsAdOrTrackerUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            string lower = url.ToLowerInvariant();
+            for (int i = 0; i < AdTrackerDomains.Length; i++)
+            {
+                if (lower.Contains(AdTrackerDomains[i]))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private static uint WM_SHOW_FIRST_INSTANCE;
         private static System.Threading.Mutex singleMutex;
 
@@ -92,6 +198,11 @@ namespace PrivateViewerApp
         private Label lblTitle;
         private Button btnToggleAffinity;
         private Button btnOpenFile;
+        private Button btnClickThrough;
+        private bool isClickThrough = false;
+        private Button btnDarkMode;
+        private bool isForcedDark = true;
+        private Button btnPanic;
         private Button btnToggleMenu;
         private Button btnMiniMode;
         private CheckBox chkAlwaysOnTop;
@@ -175,7 +286,7 @@ namespace PrivateViewerApp
         private void InitializeComponent()
         {
             this.Text = "PrivateViewer - by Alex Ponzin (@Ilponz)";
-            this.Size = new Size(1040, 700);
+            this.Size = new Size(1140, 700);
             this.MinimumSize = new Size(540, 360);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(20, 20, 20);
@@ -252,26 +363,38 @@ namespace PrivateViewerApp
             lblTitle.Margin = new Padding(4, 8, 8, 4);
 
             btnToggleAffinity = new Button();
-            btnToggleAffinity.Text = "🛡️ Protetto da Cattura";
+            btnToggleAffinity.Text = "🛡️ Protetto";
             btnToggleAffinity.BackColor = Color.FromArgb(34, 139, 34);
             btnToggleAffinity.ForeColor = Color.White;
             btnToggleAffinity.FlatStyle = FlatStyle.Flat;
             btnToggleAffinity.FlatAppearance.BorderSize = 0;
             btnToggleAffinity.Font = new Font("Segoe UI", 9, FontStyle.Bold);
-            btnToggleAffinity.Size = new Size(160, 28);
-            btnToggleAffinity.Margin = new Padding(4, 4, 6, 4);
+            btnToggleAffinity.Size = new Size(130, 28);
+            btnToggleAffinity.Margin = new Padding(3, 4, 4, 4);
             btnToggleAffinity.Cursor = Cursors.Hand;
             btnToggleAffinity.Click += BtnToggleAffinity_Click;
             toolTip.SetToolTip(btnToggleAffinity, "Attiva o disattiva la protezione da registrazione e screenshot");
 
-            // Unico pulsante strumenti mantenuto: Visualizzatore PDF e File locali
-            btnOpenFile = CreateToolbarButton("📂 Apri File / PDF", 120, 28, Color.FromArgb(55, 55, 55), "Apri un PDF o file locale in modalità protetta");
+            // Pulsante strumenti: Visualizzatore PDF e File locali
+            btnOpenFile = CreateToolbarButton("📂 File / PDF", 100, 28, Color.FromArgb(55, 55, 55), "Apri un PDF o file locale in modalità protetta");
             btnOpenFile.Click += BtnOpenFile_Click;
 
-            btnToggleMenu = CreateToolbarButton("▲ Nascondi Barra", 120, 28, Color.FromArgb(48, 48, 48), "Nascondi questa barra per vedere solo le schede e pagine (Ctrl + M)");
+            // Pulsante Clic-Attraverso (Click-Through WS_EX_TRANSPARENT)
+            btnClickThrough = CreateToolbarButton("🖱️ Clic-Attraverso", 115, 28, Color.FromArgb(48, 48, 48), "Attiva/Disattiva Clic-Attraverso (Ctrl+Shift+X o F8): i clic attraversano la finestra per interagire con le app sotto");
+            btnClickThrough.Click += (s, e) => { ToggleClickThrough(); };
+
+            // Pulsante Dark Mode Forzata Universale
+            btnDarkMode = CreateToolbarButton("🌙 Dark [ON]", 95, 28, Color.FromArgb(20, 90, 160), "Attiva/Disattiva Dark Mode forzata su tutti i siti web (Ctrl + D)");
+            btnDarkMode.Click += (s, e) => { ToggleDarkMode(); };
+
+            // Pulsante Panic Exit Istantaneo
+            btnPanic = CreateToolbarButton("🚨 Panic (F12)", 95, 28, Color.FromArgb(160, 30, 30), "Chiusura di emergenza istantanea ed eliminazione totale tracce (F12 o Ctrl+Shift+Q)");
+            btnPanic.Click += (s, e) => { PanicExit(); };
+
+            btnToggleMenu = CreateToolbarButton("▲ Nascondi", 95, 28, Color.FromArgb(48, 48, 48), "Nascondi questa barra per vedere solo le schede e pagine (Ctrl + M)");
             btnToggleMenu.Click += (s, e) => { ToggleMenuVisibility(); };
 
-            btnMiniMode = CreateToolbarButton("🔍 Minuscola", 100, 28, Color.FromArgb(48, 48, 48), "Riduci la schermata a finestra minuscola / compatta (Ctrl + Shift + M)");
+            btnMiniMode = CreateToolbarButton("🔍 Minuscola", 95, 28, Color.FromArgb(48, 48, 48), "Riduci la schermata a finestra minuscola / compatta (Ctrl + Shift + M)");
             btnMiniMode.Click += (s, e) => { ToggleMiniMode(); };
 
             pnlMiniSize = new Panel();
@@ -336,6 +459,9 @@ namespace PrivateViewerApp
             flowTopLeft.Controls.Add(lblTitle);
             flowTopLeft.Controls.Add(btnToggleAffinity);
             flowTopLeft.Controls.Add(btnOpenFile);
+            flowTopLeft.Controls.Add(btnClickThrough);
+            flowTopLeft.Controls.Add(btnDarkMode);
+            flowTopLeft.Controls.Add(btnPanic);
             flowTopLeft.Controls.Add(btnToggleMenu);
             flowTopLeft.Controls.Add(btnMiniMode);
             flowTopLeft.Controls.Add(pnlMiniSize);
@@ -369,7 +495,7 @@ namespace PrivateViewerApp
             toolTip.SetToolTip(btnRestoreMenu, "Riapre la barra superiore dei comandi (Ctrl + M)");
 
             lblMiniShortcuts = new Label();
-            lblMiniShortcuts.Text = "💡 [Ctrl+M] Barra | [Ctrl+Shift+M] Minuscola | [Ctrl+↑/↓] Opacità | [F11] Schermo Intero | [ESC] Boss Key";
+            lblMiniShortcuts.Text = "💡 [Ctrl+M] Barra | [F12] Panic | [Ctrl+Shift+X / F8] Clic-Passa | [Ctrl+D] Dark | [Ctrl+↑/↓] Opacità | [ESC] Boss";
             lblMiniShortcuts.Font = new Font("Segoe UI", 8.5f);
             lblMiniShortcuts.ForeColor = Color.DarkGray;
             lblMiniShortcuts.Dock = DockStyle.Right;
@@ -823,6 +949,9 @@ namespace PrivateViewerApp
                     if (lblTitle != null) lblTitle.Visible = false;
                     if (btnToggleAffinity != null) btnToggleAffinity.Visible = false;
                     if (btnOpenFile != null) btnOpenFile.Visible = false;
+                    if (btnClickThrough != null) btnClickThrough.Visible = false;
+                    if (btnDarkMode != null) btnDarkMode.Visible = false;
+                    if (btnPanic != null) btnPanic.Visible = false;
                     if (btnToggleMenu != null) btnToggleMenu.Visible = false;
                     if (chkAlwaysOnTop != null) chkAlwaysOnTop.Visible = false;
                     if (chkHideTaskbar != null) chkHideTaskbar.Visible = false;
@@ -842,6 +971,9 @@ namespace PrivateViewerApp
                     if (lblTitle != null) lblTitle.Visible = true;
                     if (btnToggleAffinity != null) btnToggleAffinity.Visible = true;
                     if (btnOpenFile != null) btnOpenFile.Visible = true;
+                    if (btnClickThrough != null) btnClickThrough.Visible = true;
+                    if (btnDarkMode != null) btnDarkMode.Visible = true;
+                    if (btnPanic != null) btnPanic.Visible = true;
                     if (btnToggleMenu != null) btnToggleMenu.Visible = true;
                     if (chkAlwaysOnTop != null) chkAlwaysOnTop.Visible = true;
                     if (chkHideTaskbar != null) chkHideTaskbar.Visible = true;
@@ -870,6 +1002,179 @@ namespace PrivateViewerApp
             }
         }
 
+        // ==============================================================================
+        // GESTIONE HOTKEY GLOBALI & MODALITÀ SPECIALI (Clic-Attraverso, Dark Mode, Panic)
+        // ==============================================================================
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            try
+            {
+                RegisterHotKey(this.Handle, HOTKEY_CLICKTHROUGH_CTRL_SHIFT_X, MOD_CONTROL | MOD_SHIFT, (uint)Keys.X);
+                RegisterHotKey(this.Handle, HOTKEY_CLICKTHROUGH_F8, 0, (uint)Keys.F8);
+                RegisterHotKey(this.Handle, HOTKEY_PANIC_CTRL_SHIFT_Q, MOD_CONTROL | MOD_SHIFT, (uint)Keys.Q);
+                RegisterHotKey(this.Handle, HOTKEY_PANIC_F12, 0, (uint)Keys.F12);
+            }
+            catch { }
+        }
+
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            try
+            {
+                UnregisterHotKey(this.Handle, HOTKEY_CLICKTHROUGH_CTRL_SHIFT_X);
+                UnregisterHotKey(this.Handle, HOTKEY_CLICKTHROUGH_F8);
+                UnregisterHotKey(this.Handle, HOTKEY_PANIC_CTRL_SHIFT_Q);
+                UnregisterHotKey(this.Handle, HOTKEY_PANIC_F12);
+            }
+            catch { }
+            base.OnHandleDestroyed(e);
+        }
+
+        public void ToggleClickThrough()
+        {
+            isClickThrough = !isClickThrough;
+            int currentStyle = GetWindowExStyle(this.Handle);
+            if (isClickThrough)
+            {
+                SetWindowExStyle(this.Handle, currentStyle | WS_EX_LAYERED | WS_EX_TRANSPARENT);
+                if (btnClickThrough != null)
+                {
+                    btnClickThrough.Text = "🖱️ Clic Passa [ON]";
+                    btnClickThrough.BackColor = Color.FromArgb(190, 85, 0);
+                }
+                toolTip.SetToolTip(btnClickThrough, "Clic-Attraverso ATTIVO: i clic attraversano la finestra!\nPremi [Ctrl+Shift+X] o [F8] per disattivare.");
+                if (lblFooterStatus != null)
+                {
+                    lblFooterStatus.Text = "🖱️ Clic-Attraverso ATTIVO: i clic passano alle finestre sotto | Premi [Ctrl+Shift+X] o [F8] per disattivare";
+                }
+            }
+            else
+            {
+                SetWindowExStyle(this.Handle, currentStyle & ~WS_EX_TRANSPARENT);
+                if (btnClickThrough != null)
+                {
+                    btnClickThrough.Text = "🖱️ Clic-Attraverso";
+                    btnClickThrough.BackColor = Color.FromArgb(48, 48, 48);
+                }
+                toolTip.SetToolTip(btnClickThrough, "Attiva modalità Clic-Attraverso (Ctrl+Shift+X o F8): i clic attraversano la finestra");
+                if (lblFooterStatus != null)
+                {
+                    lblFooterStatus.Text = "🔒 Trascina le schede per riordinarle | Click rotellina per chiudere | Trascina file/PDF per aprirli";
+                }
+            }
+        }
+
+        public void PanicExit()
+        {
+            try
+            {
+                this.Opacity = 0.0;
+                ShowWindow(this.Handle, SW_HIDE);
+                this.Visible = false;
+            }
+            catch { }
+
+            try
+            {
+                Application.RemoveMessageFilter(this);
+            }
+            catch { }
+
+            if (trayIcon != null)
+            {
+                try
+                {
+                    trayIcon.Visible = false;
+                    trayIcon.Dispose();
+                }
+                catch { }
+            }
+
+            try { Clipboard.Clear(); } catch { }
+
+            try
+            {
+                UnregisterHotKey(this.Handle, HOTKEY_CLICKTHROUGH_CTRL_SHIFT_X);
+                UnregisterHotKey(this.Handle, HOTKEY_CLICKTHROUGH_F8);
+                UnregisterHotKey(this.Handle, HOTKEY_PANIC_CTRL_SHIFT_Q);
+                UnregisterHotKey(this.Handle, HOTKEY_PANIC_F12);
+            }
+            catch { }
+
+            CleanupSessionFolder();
+
+            Environment.Exit(0);
+        }
+
+        public void ToggleDarkMode()
+        {
+            isForcedDark = !isForcedDark;
+            UpdateDarkModeUI();
+            ApplyDarkModeToAllTabs(isForcedDark);
+        }
+
+        private void UpdateDarkModeUI()
+        {
+            if (btnDarkMode != null)
+            {
+                if (isForcedDark)
+                {
+                    btnDarkMode.Text = "🌙 Dark [ON]";
+                    btnDarkMode.BackColor = Color.FromArgb(20, 90, 160);
+                }
+                else
+                {
+                    btnDarkMode.Text = "🌙 Dark [OFF]";
+                    btnDarkMode.BackColor = Color.FromArgb(48, 48, 48);
+                }
+            }
+        }
+
+        private void ApplyDarkModeToTab(WebView2 wv, bool enable)
+        {
+            if (wv == null || wv.CoreWebView2 == null) return;
+            string js;
+            if (enable)
+            {
+                js = @"(function(){
+                    var el = document.getElementById('pv-dark-mode-style');
+                    if (!el) {
+                        el = document.createElement('style');
+                        el.id = 'pv-dark-mode-style';
+                        el.textContent = 'html { filter: invert(90%) hue-rotate(180deg) !important; background-color: #121212 !important; } img, video, canvas, svg, picture, [style*=""background-image""] { filter: invert(100%) hue-rotate(180deg) !important; }';
+                        (document.head || document.documentElement).appendChild(el);
+                    }
+                })();";
+            }
+            else
+            {
+                js = @"(function(){
+                    var el = document.getElementById('pv-dark-mode-style');
+                    if (el) el.remove();
+                })();";
+            }
+            try { wv.CoreWebView2.ExecuteScriptAsync(js); } catch { }
+        }
+
+        private void ApplyDarkModeToAllTabs(bool enable)
+        {
+            try
+            {
+                foreach (TabPage tab in tabControl.TabPages)
+                {
+                    foreach (Control c in tab.Controls)
+                    {
+                        if (c is WebView2)
+                        {
+                            ApplyDarkModeToTab((WebView2)c, enable);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
         private void SetupTrayIcon()
         {
             trayMenu = new ContextMenuStrip();
@@ -890,6 +1195,10 @@ namespace PrivateViewerApp
                 AddNewBrowserTab("https://www.google.com");
             });
             trayMenu.Items.Add("Protezione Cattura On/Off", null, (s, e) => ApplyProtection(!isProtected));
+            trayMenu.Items.Add("Clic-Attraverso On/Off (Ctrl+Shift+X / F8)", null, (s, e) => ToggleClickThrough());
+            trayMenu.Items.Add("Dark Mode Forzata On/Off (Ctrl+D)", null, (s, e) => ToggleDarkMode());
+            trayMenu.Items.Add(new ToolStripSeparator());
+            trayMenu.Items.Add("🚨 Panic Exit - Elimina Tracce (F12)", null, (s, e) => PanicExit());
             trayMenu.Items.Add(new ToolStripSeparator());
             trayMenu.Items.Add("Esci da PrivateViewer", null, (s, e) => {
                 trayIcon.Visible = false;
@@ -1149,6 +1458,11 @@ namespace PrivateViewerApp
                     btnBack.ForeColor = btnBack.Enabled ? Color.White : Color.Gray;
                     btnForward.Enabled = webView.CanGoForward;
                     btnForward.ForeColor = btnForward.Enabled ? Color.White : Color.Gray;
+
+                    if (isForcedDark)
+                    {
+                        ApplyDarkModeToTab(webView, true);
+                    }
                 };
 
                 webView.SourceChanged += (s, e) => {
@@ -1167,9 +1481,24 @@ namespace PrivateViewerApp
                         HideToTray();
                         e.Handled = true;
                     }
+                    else if (e.KeyCode == Keys.F12 || (ctrl && shift && e.KeyCode == Keys.Q))
+                    {
+                        PanicExit();
+                        e.Handled = true;
+                    }
                     else if (e.KeyCode == Keys.F11)
                     {
                         ToggleFullScreen();
+                        e.Handled = true;
+                    }
+                    else if ((ctrl && shift && e.KeyCode == Keys.X) || e.KeyCode == Keys.F8)
+                    {
+                        ToggleClickThrough();
+                        e.Handled = true;
+                    }
+                    else if (ctrl && e.KeyCode == Keys.D)
+                    {
+                        ToggleDarkMode();
                         e.Handled = true;
                     }
                     else if (ctrl && shift && e.KeyCode == Keys.M)
@@ -1212,15 +1541,34 @@ namespace PrivateViewerApp
 
                 if (webView.CoreWebView2 != null)
                 {
-                    // Disattiva salvataggio password, autofill e dati persistenti
+                    // Disattiva salvataggio password, autofill e telemetria
                     webView.CoreWebView2.Settings.IsPasswordAutosaveEnabled = false;
                     webView.CoreWebView2.Settings.IsGeneralAutofillEnabled = false;
 
-                    // Script DOM globale per catturare ESC in qualsiasi punto della pagina web e nascondere immediatamente l'app
+                    // Blocco Ad & Tracker integrato a livello di richiesta di rete (HTTP 204 No Content)
+                    webView.CoreWebView2.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+                    webView.CoreWebView2.WebResourceRequested += (s, args) => {
+                        try
+                        {
+                            if (IsAdOrTrackerUrl(args.Request.Uri))
+                            {
+                                args.Response = sharedEnv.CreateWebResourceResponse(new MemoryStream(), 204, "No Content", "");
+                            }
+                        }
+                        catch { }
+                    };
+
+                    // Script DOM globale per catturare Boss Key (ESC), Panic Exit (F12 / Ctrl+Shift+Q), Clic-Attraverso e DarkMode ovunque nella pagina
                     await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(@"
                         window.addEventListener('keydown', function(e) {
                             if (e.key === 'Escape' || e.keyCode === 27) {
                                 window.chrome.webview.postMessage('BOSS_KEY_ESC');
+                            } else if (e.key === 'F12' || e.keyCode === 123 || (e.ctrlKey && e.shiftKey && (e.key === 'Q' || e.keyCode === 81))) {
+                                window.chrome.webview.postMessage('PANIC_EXIT');
+                            } else if ((e.ctrlKey && e.shiftKey && (e.key === 'X' || e.keyCode === 88)) || e.key === 'F8' || e.keyCode === 119) {
+                                window.chrome.webview.postMessage('TOGGLE_CLICKTHROUGH');
+                            } else if (e.ctrlKey && (e.key === 'd' || e.key === 'D' || e.keyCode === 68)) {
+                                window.chrome.webview.postMessage('TOGGLE_DARKMODE');
                             }
                         }, true);
                     ");
@@ -1232,6 +1580,18 @@ namespace PrivateViewerApp
                             if (msg == "BOSS_KEY_ESC")
                             {
                                 this.BeginInvoke((Action)(() => HideToTray()));
+                            }
+                            else if (msg == "PANIC_EXIT")
+                            {
+                                this.BeginInvoke((Action)(() => PanicExit()));
+                            }
+                            else if (msg == "TOGGLE_CLICKTHROUGH")
+                            {
+                                this.BeginInvoke((Action)(() => ToggleClickThrough()));
+                            }
+                            else if (msg == "TOGGLE_DARKMODE")
+                            {
+                                this.BeginInvoke((Action)(() => ToggleDarkMode()));
                             }
                         }
                         catch { }
@@ -1421,7 +1781,7 @@ namespace PrivateViewerApp
         }
 
         // ==============================================================================
-        // GESTIONE SCORCIATOIE DA TASTIERA GLOBALI (Boss Key, Ctrl+M, F11, Ctrl+T, Ctrl+W, Ctrl+Tab)
+        // GESTIONE SCORCIATOIE DA TASTIERA GLOBALI (Boss Key, Panic, Clic-Attraverso, Dark Mode, Ctrl+M, F11, Ctrl+T, Ctrl+W, Ctrl+Tab)
         // ==============================================================================
         public bool PreFilterMessage(ref Message m)
         {
@@ -1436,6 +1796,30 @@ namespace PrivateViewerApp
                     return true;
                 }
 
+                bool ctrlPressed = (Control.ModifierKeys & Keys.Control) == Keys.Control;
+                bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+
+                // Panic Exit: F12 o Ctrl + Shift + Q
+                if (key == Keys.F12 || (ctrlPressed && shiftPressed && key == Keys.Q))
+                {
+                    PanicExit();
+                    return true;
+                }
+
+                // Clic-Attraverso: F8 o Ctrl + Shift + X
+                if (key == Keys.F8 || (ctrlPressed && shiftPressed && key == Keys.X))
+                {
+                    ToggleClickThrough();
+                    return true;
+                }
+
+                // Dark Mode Forzata: Ctrl + D
+                if (ctrlPressed && key == Keys.D)
+                {
+                    ToggleDarkMode();
+                    return true;
+                }
+
                 // F11: Fullscreen immersivo
                 if (key == Keys.F11)
                 {
@@ -1443,8 +1827,6 @@ namespace PrivateViewerApp
                     return true;
                 }
 
-                bool ctrlPressed = (Control.ModifierKeys & Keys.Control) == Keys.Control;
-                bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
                 if (ctrlPressed)
                 {
                     // Ctrl + Shift + M: Schermata Minuscola On/Off | Ctrl + M: Mostra/Nascondi Barra (Zen Mode)
@@ -1510,6 +1892,21 @@ namespace PrivateViewerApp
             if (keyData == Keys.Escape)
             {
                 HideToTray();
+                return true;
+            }
+            if (keyData == Keys.F12 || keyData == (Keys.Control | Keys.Shift | Keys.Q))
+            {
+                PanicExit();
+                return true;
+            }
+            if (keyData == Keys.F8 || keyData == (Keys.Control | Keys.Shift | Keys.X))
+            {
+                ToggleClickThrough();
+                return true;
+            }
+            if (keyData == (Keys.Control | Keys.D) || keyData == (Keys.Control | Keys.Shift | Keys.D))
+            {
+                ToggleDarkMode();
                 return true;
             }
             if (keyData == Keys.F11)
@@ -1655,6 +2052,20 @@ namespace PrivateViewerApp
             {
                 RestoreWindow();
                 return;
+            }
+            if (m.Msg == WM_HOTKEY)
+            {
+                int hotkeyId = m.WParam.ToInt32();
+                if (hotkeyId == HOTKEY_CLICKTHROUGH_CTRL_SHIFT_X || hotkeyId == HOTKEY_CLICKTHROUGH_F8)
+                {
+                    ToggleClickThrough();
+                    return;
+                }
+                if (hotkeyId == HOTKEY_PANIC_CTRL_SHIFT_Q || hotkeyId == HOTKEY_PANIC_F12)
+                {
+                    PanicExit();
+                    return;
+                }
             }
             if (m.Msg == WM_SYSCOMMAND)
             {
