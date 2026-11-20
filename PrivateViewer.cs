@@ -29,12 +29,16 @@ namespace PrivateViewerApp
         // Costanti autore
         public const string AUTHOR_NAME = "Alex Ponzin";
         public const string AUTHOR_HANDLE = "@Ilponz";
-        public const string REPO_URL = "https://github.com/Ilponz/PrivateViewer";
+        public const string REPO_URL = "https://github.com/flydarkfenix/PrivateViewer";
 
         // Win32 API Constants & Functions
         private const uint WDA_NONE = 0x00000000;
+        private const uint WDA_MONITOR = 0x00000001;
         private const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
         private const int WM_KEYDOWN = 0x0100;
+        private const int WM_SYSCOMMAND = 0x0112;
+        private const int SC_MINIMIZE = 0xF020;
+        private const int SC_CLOSE = 0xF060;
 
         private const int SW_HIDE = 0;
         private const int SW_SHOWNORMAL = 1;
@@ -785,69 +789,80 @@ namespace PrivateViewerApp
 
         public void ToggleMiniMode()
         {
-            if (!isMiniMode)
+            this.SuspendLayout();
+            try
             {
-                if (isFullScreen)
+                if (!isMiniMode)
                 {
-                    ToggleFullScreen();
+                    if (isFullScreen)
+                    {
+                        ToggleFullScreen();
+                    }
+                    if (this.WindowState == FormWindowState.Maximized)
+                    {
+                        this.WindowState = FormWindowState.Normal;
+                    }
+                    prevNormalSize = this.Size;
+                    prevNormalLocation = this.Location;
+
+                    this.MinimumSize = new Size(180, 120);
+                    int targetW = tbMiniSize != null ? tbMiniSize.Value : 320;
+                    int targetH = (int)(targetW * 0.625);
+
+                    // Posiziona in basso a destra sopra l'area di lavoro in un'unica operazione atomica
+                    Rectangle workingArea = Screen.FromControl(this).WorkingArea;
+                    this.SetBounds(workingArea.Right - targetW - 15, workingArea.Bottom - targetH - 15, targetW, targetH);
+
+                    isMiniMode = true;
+
+                    // Mostra slider di ridimensionamento e nascondi pulsanti ingombranti
+                    if (lblTitle != null) lblTitle.Visible = false;
+                    if (btnToggleAffinity != null) btnToggleAffinity.Visible = false;
+                    if (btnOpenFile != null) btnOpenFile.Visible = false;
+                    if (btnToggleMenu != null) btnToggleMenu.Visible = false;
+                    if (chkAlwaysOnTop != null) chkAlwaysOnTop.Visible = false;
+                    if (chkHideTaskbar != null) chkHideTaskbar.Visible = false;
+                    if (pnlMiniSize != null) pnlMiniSize.Visible = true;
+
+                    if (btnMiniMode != null)
+                    {
+                        btnMiniMode.Text = "🔍 Ingrandisci";
+                        btnMiniMode.BackColor = Color.FromArgb(180, 90, 0);
+                        toolTip.SetToolTip(btnMiniMode, "Ripristina le dimensioni normali (Ctrl + Shift + M)");
+                    }
                 }
-                if (this.WindowState == FormWindowState.Maximized)
+                else
                 {
-                    this.WindowState = FormWindowState.Normal;
-                }
-                prevNormalSize = this.Size;
-                prevNormalLocation = this.Location;
+                    isMiniMode = false;
+                    if (pnlMiniSize != null) pnlMiniSize.Visible = false;
+                    if (lblTitle != null) lblTitle.Visible = true;
+                    if (btnToggleAffinity != null) btnToggleAffinity.Visible = true;
+                    if (btnOpenFile != null) btnOpenFile.Visible = true;
+                    if (btnToggleMenu != null) btnToggleMenu.Visible = true;
+                    if (chkAlwaysOnTop != null) chkAlwaysOnTop.Visible = true;
+                    if (chkHideTaskbar != null) chkHideTaskbar.Visible = true;
 
-                this.MinimumSize = new Size(180, 120);
-                int targetW = tbMiniSize != null ? tbMiniSize.Value : 320;
-                int targetH = (int)(targetW * 0.625);
-                this.Size = new Size(targetW, targetH);
+                    this.MinimumSize = new Size(540, 360);
+                    if (prevNormalLocation.X >= 0 && prevNormalLocation.Y >= 0)
+                    {
+                        this.SetBounds(prevNormalLocation.X, prevNormalLocation.Y, prevNormalSize.Width, prevNormalSize.Height);
+                    }
+                    else
+                    {
+                        this.Size = prevNormalSize;
+                    }
 
-                // Posiziona in basso a destra sopra l'area di lavoro
-                Rectangle workingArea = Screen.FromControl(this).WorkingArea;
-                this.Location = new Point(workingArea.Right - targetW - 15, workingArea.Bottom - targetH - 15);
-
-                isMiniMode = true;
-
-                // Mostra slider di ridimensionamento e nascondi pulsanti ingombranti
-                if (lblTitle != null) lblTitle.Visible = false;
-                if (btnToggleAffinity != null) btnToggleAffinity.Visible = false;
-                if (btnOpenFile != null) btnOpenFile.Visible = false;
-                if (btnToggleMenu != null) btnToggleMenu.Visible = false;
-                if (chkAlwaysOnTop != null) chkAlwaysOnTop.Visible = false;
-                if (chkHideTaskbar != null) chkHideTaskbar.Visible = false;
-                if (pnlMiniSize != null) pnlMiniSize.Visible = true;
-
-                if (btnMiniMode != null)
-                {
-                    btnMiniMode.Text = "🔍 Ingrandisci";
-                    btnMiniMode.BackColor = Color.FromArgb(180, 90, 0);
-                    toolTip.SetToolTip(btnMiniMode, "Ripristina le dimensioni normali (Ctrl + Shift + M)");
+                    if (btnMiniMode != null)
+                    {
+                        btnMiniMode.Text = "🔍 Minuscola";
+                        btnMiniMode.BackColor = Color.FromArgb(48, 48, 48);
+                        toolTip.SetToolTip(btnMiniMode, "Riduci la schermata a finestra minuscola (Ctrl + Shift + M)");
+                    }
                 }
             }
-            else
+            finally
             {
-                isMiniMode = false;
-                if (pnlMiniSize != null) pnlMiniSize.Visible = false;
-                if (lblTitle != null) lblTitle.Visible = true;
-                if (btnToggleAffinity != null) btnToggleAffinity.Visible = true;
-                if (btnOpenFile != null) btnOpenFile.Visible = true;
-                if (btnToggleMenu != null) btnToggleMenu.Visible = true;
-                if (chkAlwaysOnTop != null) chkAlwaysOnTop.Visible = true;
-                if (chkHideTaskbar != null) chkHideTaskbar.Visible = true;
-
-                this.MinimumSize = new Size(540, 360);
-                this.Size = prevNormalSize;
-                if (prevNormalLocation.X >= 0 && prevNormalLocation.Y >= 0)
-                {
-                    this.Location = prevNormalLocation;
-                }
-                if (btnMiniMode != null)
-                {
-                    btnMiniMode.Text = "🔍 Minuscola";
-                    btnMiniMode.BackColor = Color.FromArgb(48, 48, 48);
-                    toolTip.SetToolTip(btnMiniMode, "Riduci la schermata a finestra minuscola (Ctrl + Shift + M)");
-                }
+                this.ResumeLayout(true);
             }
         }
 
@@ -1222,26 +1237,36 @@ namespace PrivateViewerApp
 
         private void ApplyProtection(bool enable)
         {
-            uint affinity = enable ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE;
-            bool ok = SetWindowDisplayAffinity(this.Handle, affinity);
+            if (!enable)
+            {
+                SetWindowDisplayAffinity(this.Handle, WDA_NONE);
+                isProtected = false;
+                btnToggleAffinity.Text = "⚠️ Visibile (Disattivo)";
+                btnToggleAffinity.BackColor = Color.FromArgb(160, 60, 60);
+                return;
+            }
+
+            // 1. Tenta WDA_EXCLUDEFROMCAPTURE (Windows 10 2004+ / Windows 11 - trasparente)
+            bool ok = SetWindowDisplayAffinity(this.Handle, WDA_EXCLUDEFROMCAPTURE);
+            if (!ok)
+            {
+                // 2. Fallback su WDA_MONITOR (Windows 7/8/10 LTSC/scuola/VM - schermo nero alla cattura)
+                ok = SetWindowDisplayAffinity(this.Handle, WDA_MONITOR);
+            }
+
             if (ok)
             {
-                isProtected = enable;
-                if (enable)
-                {
-                    btnToggleAffinity.Text = "🛡️ Protetto da Cattura";
-                    btnToggleAffinity.BackColor = Color.FromArgb(34, 139, 34);
-                }
-                else
-                {
-                    btnToggleAffinity.Text = "⚠️ Visibile (Disattivo)";
-                    btnToggleAffinity.BackColor = Color.FromArgb(160, 60, 60);
-                }
+                isProtected = true;
+                btnToggleAffinity.Text = "🛡️ Protetto da Cattura";
+                btnToggleAffinity.BackColor = Color.FromArgb(34, 139, 34);
             }
             else
             {
-                int err = Marshal.GetLastWin32Error();
-                MessageBox.Show("Impossibile impostare Display Affinity. Codice: " + err, "Errore API", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // 3. Se il monitor/driver del PC della scuola non supporta l'hardware affinity,
+                // degrada silenziosamente SENZA bloccare l'interfaccia con popup di errore!
+                isProtected = false;
+                btnToggleAffinity.Text = "⚠️ Monitor Senza Affinity";
+                btnToggleAffinity.BackColor = Color.FromArgb(120, 80, 0);
             }
         }
 
@@ -1255,13 +1280,11 @@ namespace PrivateViewerApp
         // ==============================================================================
         public void RestoreWindow()
         {
-            if (!this.Visible)
-            {
-                this.Show();
-            }
+            this.Show();
             this.WindowState = FormWindowState.Normal;
             ShowWindow(this.Handle, SW_RESTORE);
             ShowWindow(this.Handle, SW_SHOW);
+            this.Opacity = tbOpacity != null ? tbOpacity.Value / 100.0 : 0.10;
             SetForegroundWindow(this.Handle);
             this.BringToFront();
             this.Activate();
@@ -1288,7 +1311,9 @@ namespace PrivateViewerApp
 
         private void HideToTray()
         {
-            this.Hide();
+            this.Opacity = 0.0;
+            ShowWindow(this.Handle, SW_HIDE);
+            this.Visible = false;
             trayIcon.Visible = true;
         }
 
@@ -1297,7 +1322,9 @@ namespace PrivateViewerApp
             base.OnResize(e);
             if (this.WindowState == FormWindowState.Minimized)
             {
-                this.Hide();
+                this.Opacity = 0.0;
+                ShowWindow(this.Handle, SW_HIDE);
+                this.Visible = false;
             }
             if (isMiniMode && tbMiniSize != null && this.WindowState == FormWindowState.Normal)
             {
@@ -1429,6 +1456,16 @@ namespace PrivateViewerApp
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            // 1. Rendi immediatamente invisibile e azzera l'opacità PRIMA di qualsiasi altra operazione!
+            // Questo impedisce al 100% che la finestra ricompaia o sfarfalli sullo schermo mentre i controlli vengono rilasciati.
+            try
+            {
+                this.Opacity = 0.0;
+                ShowWindow(this.Handle, SW_HIDE);
+                this.Visible = false;
+            }
+            catch { }
+
             Application.RemoveMessageFilter(this);
             if (trayIcon != null)
             {
@@ -1531,11 +1568,23 @@ namespace PrivateViewerApp
             if (WM_SHOW_FIRST_INSTANCE != 0 && (uint)m.Msg == WM_SHOW_FIRST_INSTANCE)
             {
                 RestoreWindow();
-                this.WindowState = FormWindowState.Normal;
-                this.BringToFront();
-                this.Activate();
-                SetForegroundWindow(this.Handle);
                 return;
+            }
+            if (m.Msg == WM_SYSCOMMAND)
+            {
+                int cmd = (int)m.WParam & 0xFFF0;
+                if (cmd == SC_MINIMIZE)
+                {
+                    // Evita l'animazione di Windows che fa ricomparire o lampeggiare la finestra
+                    HideToTray();
+                    return;
+                }
+                if (cmd == SC_CLOSE)
+                {
+                    this.Opacity = 0.0;
+                    ShowWindow(this.Handle, SW_HIDE);
+                    this.Visible = false;
+                }
             }
             base.WndProc(ref m);
         }
