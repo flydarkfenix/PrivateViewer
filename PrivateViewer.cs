@@ -61,6 +61,54 @@ namespace PrivateViewerApp
         private const int HOTKEY_PANIC        = 9002; // Ctrl + Alt + Q
         private const int HOTKEY_OPACITY_ZERO = 9003; // Ctrl + Alt + 0 (Opacità 0% istantanea)
         private const int HOTKEY_OPACITY_FULL = 9004; // Ctrl + Alt + 9 (Ripristino opacità 100%)
+        private const int HOTKEY_TOGGLE_SHOW  = 9005; // Ctrl + Alt + P (Mostra/Nascondi rapido)
+
+        // Guida predefinita alle scorciatoie e alle funzioni di PrivateViewer
+        private const string DEFAULT_NOTES_CONTENT = 
+            "// =============================================================================\r\n" +
+            "// 🛡️ PrivateViewer - GUIDA RAPIDA & SCORCIATOIE DA TASTIERA\r\n" +
+            "// Ideato e creato da: Alex Ponzin (@Ilponz)\r\n" +
+            "// Repository: " + REPO_URL + "\r\n" +
+            "// =============================================================================\r\n" +
+            "//\r\n" +
+            "// 🚨 EMERGENZA & PRIVACY:\r\n" +
+            "//   • Ctrl + Alt + Q    : PANIC EXIT (Chiusura istantanea a zero tracce e pulizia RAM/cache)\r\n" +
+            "//   • Ctrl + Alt + P    : Mostra / Nascondi finestra rapido da qualsiasi applicazione\r\n" +
+            "//   • ESC               : BOSS KEY (Nasconde all'istante l'applicazione nella tray)\r\n" +
+            "//   • 👻 Stealth        : Finestra invisibile nella barra delle applicazioni di Windows\r\n" +
+            "//   • 🛡️ Anti-Cattura   : Schermo nero protetto contro screenshot, OBS, Teams e software spia\r\n" +
+            "//\r\n" +
+            "// 👁️ TRASPARENZA & VISIBILITÀ (0% - 100%):\r\n" +
+            "//   • Ctrl + Alt + 0    : Opacità 0% (Completamente invisibile ma attiva e trasparente)\r\n" +
+            "//   • Ctrl + Alt + 9    : Opacità 100% (Ripristino visibilità piena della finestra)\r\n" +
+            "//   • Ctrl + Freccia Su : Aumenta l'opacità del +5%\r\n" +
+            "//   • Ctrl + Freccia Giù: Diminuisce l'opacità del -5%\r\n" +
+            "//   • Slider Opacità    : Regolazione fluida continua da 0% a 100%\r\n" +
+            "//\r\n" +
+            "// 🖱️ INTERAZIONE & CLIC-ATTRAVERSO:\r\n" +
+            "//   • Ctrl + Alt + X    : Clic-Attraverso On/Off (i clic passano attraverso alle app sotto)\r\n" +
+            "//\r\n" +
+            "// 🖥️ NAVIGAZIONE & SCHERMO:\r\n" +
+            "//   • Ctrl + Shift + D  : Dark Mode forzata universale su tutte le pagine web\r\n" +
+            "//   • Ctrl + M          : Nascondi / Mostra la barra comandi superiore (Zen Mode)\r\n" +
+            "//   • Ctrl + Shift + M  : Finestra minuscola / compatta (Picture-in-Picture)\r\n" +
+            "//   • F11               : Schermo Intero On/Off\r\n" +
+            "//\r\n" +
+            "// 📑 GESTIONE SCHEDE (STILE CHROME):\r\n" +
+            "//   • Ctrl + T          : Nuova scheda web protetta\r\n" +
+            "//   • Ctrl + W          : Chiudi la scheda corrente\r\n" +
+            "//   • Ctrl + Tab        : Passa alla scheda successiva\r\n" +
+            "//   • Ctrl + Shift + Tab: Passa alla scheda precedente\r\n" +
+            "//   • Tasto Centrale    : Fai clic con la rotellina su una scheda per chiuderla\r\n" +
+            "//   • Trascina Schede   : Sposta e riordina le linguette a piacimento\r\n" +
+            "//   • Tasto [+]         : Apri una nuova scheda a destra\r\n" +
+            "//   • Doppio Clic Barra : Crea una nuova scheda su uno spazio vuoto\r\n" +
+            "//   • Tasto Destro      : Menu contestuale (Duplica, Chiudi altre, Ricarica)\r\n" +
+            "//   • Drag & Drop File  : Trascina un file PDF o immagine per visualizzarlo protetto\r\n" +
+            "//\r\n" +
+            "// =============================================================================\r\n" +
+            "// 📝 NOTE PERSONALI (Scrivi qui sotto i tuoi appunti - protetti da screenshot):\r\n" +
+            "// =============================================================================\r\n\r\n";
 
         // DWM Attributes per Dark Title Bar nativo Windows
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
@@ -88,6 +136,9 @@ namespace PrivateViewerApp
 
         [DllImport("user32.dll")]
         private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
 
         [DllImport("user32.dll")]
         private static extern bool SetProcessDPIAware();
@@ -253,6 +304,18 @@ namespace PrivateViewerApp
         private NotifyIcon trayIcon;
         private ContextMenuStrip trayMenu;
         private bool isProtected = true;
+        private bool allowShowDisplay = false; // Avvio 100% invisibile / nascosto di default
+        private bool isFirstTabCreated = false;
+
+        protected override void SetVisibleCore(bool value)
+        {
+            if (!allowShowDisplay)
+            {
+                value = false;
+                if (!this.IsHandleCreated) CreateHandle();
+            }
+            base.SetVisibleCore(value);
+        }
 
         [STAThread]
         public static void Main()
@@ -263,7 +326,12 @@ namespace PrivateViewerApp
 
             if (!createdNew)
             {
-                // Se un'istanza è già aperta, invia un messaggio broadcast per svegliarla ed esci silenziosamente
+                // Se un'istanza è già aperta, sveglia direttamente la finestra esistente ed esci
+                IntPtr existingHwnd = FindWindow(null, "PrivateViewer - by Alex Ponzin (@Ilponz)");
+                if (existingHwnd != IntPtr.Zero)
+                {
+                    PostMessage(existingHwnd, WM_SHOW_FIRST_INSTANCE, IntPtr.Zero, IntPtr.Zero);
+                }
                 PostMessage((IntPtr)0xffff, WM_SHOW_FIRST_INSTANCE, IntPtr.Zero, IntPtr.Zero);
                 return;
             }
@@ -287,13 +355,14 @@ namespace PrivateViewerApp
         {
             this.Text = "PrivateViewer - by Alex Ponzin (@Ilponz)";
             this.Size = new Size(1140, 700);
-            this.MinimumSize = new Size(540, 360);
+            this.MinimumSize = new Size(320, 200);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(20, 20, 20);
             this.ForeColor = Color.White;
             this.KeyPreview = true;
             this.AllowDrop = true;
-            this.Opacity = 0.10; // Avvio con 90% trasparenza (10% opacità)
+            this.Opacity = 0.0; // Avvio 100% invisibile / nascosto
+            this.WindowState = FormWindowState.Minimized; // Avvia ridotto
             this.TopMost = true; // Sempre in primo piano di default
             this.ShowInTaskbar = false; // Invisibile nella barra applicazioni di default (Stealth)
 
@@ -326,7 +395,7 @@ namespace PrivateViewerApp
             pnlOpacity.BorderStyle = BorderStyle.FixedSingle;
 
             lblOpacity = new Label();
-            lblOpacity.Text = "Opacità: 10%";
+            lblOpacity.Text = "Opacità: 85%";
             lblOpacity.ForeColor = Color.FromArgb(0, 220, 255);
             lblOpacity.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
             lblOpacity.AutoSize = true;
@@ -335,7 +404,7 @@ namespace PrivateViewerApp
             tbOpacity = new TrackBar();
             tbOpacity.Minimum = 0; // Trasparenza totale supportata fino a 0%
             tbOpacity.Maximum = 100;
-            tbOpacity.Value = 10;
+            tbOpacity.Value = 85;
             tbOpacity.TickStyle = TickStyle.None;
             tbOpacity.Size = new Size(100, 30);
             tbOpacity.Location = new Point(96, 6);
@@ -551,8 +620,8 @@ namespace PrivateViewerApp
             tabControl.MouseUp += TabControl_MouseUp;
             tabControl.MouseDoubleClick += TabControl_MouseDoubleClick;
 
-            // --- SCHEDA 1: NOTE PRIVATE ---
-            tabNotes = new TabPage("📝 Note Private");
+            // --- SCHEDA 1: NOTE & SCORCIATOIE ---
+            tabNotes = new TabPage("📝 Note & Scorciatoie");
             tabNotes.BackColor = Color.FromArgb(20, 20, 20);
 
             Panel notesToolbar = new Panel();
@@ -561,24 +630,27 @@ namespace PrivateViewerApp
             notesToolbar.BackColor = Color.FromArgb(30, 30, 30);
             notesToolbar.Padding = new Padding(4);
 
-            Button btnClearNotes = CreateToolbarButton("Pulisci Note", 90, 26, Color.FromArgb(55, 55, 55), "Cancella gli appunti");
-            btnClearNotes.Click += (s, e) => { txtNotes.Clear(); };
-
-            Button btnSaveNotes = CreateToolbarButton("Salva su File", 95, 26, Color.FromArgb(55, 55, 55), "Salva le note in un file .txt");
+            Button btnSaveNotes = CreateToolbarButton("💾 Salva su File", 105, 26, Color.FromArgb(55, 55, 55), "Salva le note in un file .txt");
             btnSaveNotes.Click += (s, e) => {
                 using (SaveFileDialog sfd = new SaveFileDialog())
                 {
                     sfd.Filter = "Text Files (*.txt)|*.txt";
                     if (sfd.ShowDialog() == DialogResult.OK)
                     {
-                        File.WriteAllText(sfd.FileName, txtNotes.Text);
-                        MessageBox.Show("Note salvate con successo!", "PrivateViewer", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        try { File.WriteAllText(sfd.FileName, txtNotes.Text); } catch { }
                     }
                 }
             };
 
+            Button btnClearNotes = CreateToolbarButton("🗑️ Pulisci Note", 95, 26, Color.FromArgb(55, 55, 55), "Cancella gli appunti");
+            btnClearNotes.Click += (s, e) => { txtNotes.Clear(); };
+
+            Button btnResetGuide = CreateToolbarButton("📋 Ripristina Scorciatoie", 155, 26, Color.FromArgb(45, 45, 45), "Ripristina la guida e le scorciatoie di default");
+            btnResetGuide.Click += (s, e) => { txtNotes.Text = DEFAULT_NOTES_CONTENT; };
+
             notesToolbar.Controls.Add(btnSaveNotes);
             notesToolbar.Controls.Add(btnClearNotes);
+            notesToolbar.Controls.Add(btnResetGuide);
 
             txtNotes = new TextBox();
             txtNotes.Multiline = true;
@@ -588,16 +660,7 @@ namespace PrivateViewerApp
             txtNotes.ForeColor = Color.FromArgb(220, 220, 220);
             txtNotes.Font = new Font("Consolas", 10);
             txtNotes.BorderStyle = BorderStyle.None;
-            txtNotes.Text = "// =============================================================================\r\n" +
-                            "// PrivateViewer (Clean & Streamlined Edition)\r\n" +
-                            "// Ideato e creato da: Alex Ponzin (@Ilponz)\r\n" +
-                            "// Repository: " + REPO_URL + "\r\n" +
-                            "// =============================================================================\r\n" +
-                            "// • Trascina le schede per riordinarle come in un vero browser\r\n" +
-                            "// • Fai clic con la rotellina (tasto centrale) su una scheda per chiuderla\r\n" +
-                            "// • Fai clic sul tasto [+] a destra per aprire una nuova scheda\r\n" +
-                            "// • Fai doppio clic su uno spazio vuoto della barra schede per crearne una\r\n" +
-                            "// • Fai clic destro su una scheda per opzioni rapide (duplica, chiudi altre...)\r\n\r\n";
+            txtNotes.Text = DEFAULT_NOTES_CONTENT;
 
             tabNotes.Controls.Add(txtNotes);
             tabNotes.Controls.Add(notesToolbar);
@@ -650,10 +713,22 @@ namespace PrivateViewerApp
             this.HandleCreated += (s, e) => {
                 ApplyProtection(isProtected);
                 ApplyDarkTitleBar();
+                if (!isFirstTabCreated)
+                {
+                    isFirstTabCreated = true;
+                    AddNewBrowserTab("https://www.google.com", false);
+                    if (tabNotes != null) tabControl.SelectedTab = tabNotes;
+                }
             };
 
             this.Load += (s, e) => {
-                AddNewBrowserTab("https://www.google.com");
+                if (!isFirstTabCreated)
+                {
+                    isFirstTabCreated = true;
+                    AddNewBrowserTab("https://www.google.com", false);
+                }
+                if (tabNotes != null) tabControl.SelectedTab = tabNotes;
+                UpdateToolbarResponsive(this.ClientSize.Width);
             };
         }
 
@@ -968,17 +1043,14 @@ namespace PrivateViewerApp
                 {
                     isMiniMode = false;
                     if (pnlMiniSize != null) pnlMiniSize.Visible = false;
-                    if (lblTitle != null) lblTitle.Visible = true;
                     if (btnToggleAffinity != null) btnToggleAffinity.Visible = true;
                     if (btnOpenFile != null) btnOpenFile.Visible = true;
                     if (btnClickThrough != null) btnClickThrough.Visible = true;
                     if (btnDarkMode != null) btnDarkMode.Visible = true;
                     if (btnPanic != null) btnPanic.Visible = true;
                     if (btnToggleMenu != null) btnToggleMenu.Visible = true;
-                    if (chkAlwaysOnTop != null) chkAlwaysOnTop.Visible = true;
-                    if (chkHideTaskbar != null) chkHideTaskbar.Visible = true;
 
-                    this.MinimumSize = new Size(540, 360);
+                    this.MinimumSize = new Size(320, 200);
                     if (prevNormalLocation.X >= 0 && prevNormalLocation.Y >= 0)
                     {
                         this.SetBounds(prevNormalLocation.X, prevNormalLocation.Y, prevNormalSize.Width, prevNormalSize.Height);
@@ -987,6 +1059,7 @@ namespace PrivateViewerApp
                     {
                         this.Size = prevNormalSize;
                     }
+                    UpdateToolbarResponsive(this.ClientSize.Width);
 
                     if (btnMiniMode != null)
                     {
@@ -1015,6 +1088,7 @@ namespace PrivateViewerApp
                 RegisterHotKey(this.Handle, HOTKEY_PANIC, MOD_CONTROL | MOD_ALT, (uint)Keys.Q);
                 RegisterHotKey(this.Handle, HOTKEY_OPACITY_ZERO, MOD_CONTROL | MOD_ALT, (uint)Keys.D0);
                 RegisterHotKey(this.Handle, HOTKEY_OPACITY_FULL, MOD_CONTROL | MOD_ALT, (uint)Keys.D9);
+                RegisterHotKey(this.Handle, HOTKEY_TOGGLE_SHOW, MOD_CONTROL | MOD_ALT, (uint)Keys.P);
             }
             catch { }
         }
@@ -1027,6 +1101,7 @@ namespace PrivateViewerApp
                 UnregisterHotKey(this.Handle, HOTKEY_PANIC);
                 UnregisterHotKey(this.Handle, HOTKEY_OPACITY_ZERO);
                 UnregisterHotKey(this.Handle, HOTKEY_OPACITY_FULL);
+                UnregisterHotKey(this.Handle, HOTKEY_TOGGLE_SHOW);
             }
             catch { }
             base.OnHandleDestroyed(e);
@@ -1041,29 +1116,20 @@ namespace PrivateViewerApp
                 SetWindowExStyle(this.Handle, currentStyle | WS_EX_LAYERED | WS_EX_TRANSPARENT);
                 if (btnClickThrough != null)
                 {
-                    btnClickThrough.Text = "🖱️ Clic Passa [ON]";
                     btnClickThrough.BackColor = Color.FromArgb(190, 85, 0);
                 }
                 toolTip.SetToolTip(btnClickThrough, "Clic-Attraverso ATTIVO: i clic attraversano la finestra!\nPremi [Ctrl+Alt+X] per disattivare.");
-                if (lblFooterStatus != null)
-                {
-                    lblFooterStatus.Text = "🖱️ Clic-Attraverso ATTIVO: i clic passano alle finestre sotto | Premi [Ctrl+Alt+X] per disattivare";
-                }
             }
             else
             {
                 SetWindowExStyle(this.Handle, currentStyle & ~WS_EX_TRANSPARENT);
                 if (btnClickThrough != null)
                 {
-                    btnClickThrough.Text = "🖱️ Clic-Attraverso";
                     btnClickThrough.BackColor = Color.FromArgb(48, 48, 48);
                 }
                 toolTip.SetToolTip(btnClickThrough, "Attiva modalità Clic-Attraverso (Ctrl+Alt+X): i clic attraversano la finestra");
-                if (lblFooterStatus != null)
-                {
-                    lblFooterStatus.Text = "🔒 Trascina le schede per riordinarle | Click rotellina per chiudere | Trascina file/PDF per aprirli";
-                }
             }
+            UpdateToolbarResponsive(this.ClientSize.Width);
         }
 
         public void PanicExit()
@@ -1100,6 +1166,7 @@ namespace PrivateViewerApp
                 UnregisterHotKey(this.Handle, HOTKEY_PANIC);
                 UnregisterHotKey(this.Handle, HOTKEY_OPACITY_ZERO);
                 UnregisterHotKey(this.Handle, HOTKEY_OPACITY_FULL);
+                UnregisterHotKey(this.Handle, HOTKEY_TOGGLE_SHOW);
             }
             catch { }
 
@@ -1119,17 +1186,9 @@ namespace PrivateViewerApp
         {
             if (btnDarkMode != null)
             {
-                if (isForcedDark)
-                {
-                    btnDarkMode.Text = "🌙 Dark [ON]";
-                    btnDarkMode.BackColor = Color.FromArgb(20, 90, 160);
-                }
-                else
-                {
-                    btnDarkMode.Text = "🌙 Dark [OFF]";
-                    btnDarkMode.BackColor = Color.FromArgb(48, 48, 48);
-                }
+                btnDarkMode.BackColor = isForcedDark ? Color.FromArgb(20, 90, 160) : Color.FromArgb(48, 48, 48);
             }
+            UpdateToolbarResponsive(this.ClientSize.Width);
         }
 
         private void ApplyDarkModeToTab(WebView2 wv, bool enable)
@@ -1258,6 +1317,274 @@ namespace PrivateViewerApp
             return btn;
         }
 
+        // ==============================================================================
+        // RIDIMENSIONAMENTO RESPONSIVE OTTIMIZZATO DELLA BARRA COMANDI & STRUMENTI
+        // Proporziona icone, testo e pulsanti con 4 breakpoint fino a 320px
+        // ==============================================================================
+        private void UpdateToolbarResponsive(int width)
+        {
+            if (topPanel == null || flowTopLeft == null || btnToggleAffinity == null) return;
+            if (isMiniMode) return;
+
+            // Breakpoint 1: Desktop esteso (width >= 980)
+            if (width >= 980)
+            {
+                if (lblTitle != null)
+                {
+                    lblTitle.Visible = true;
+                    lblTitle.Text = "🛡️ PrivateViewer";
+                }
+
+                btnToggleAffinity.Text = isProtected ? "🛡️ Protetto" : "⚠️ Non Protetto";
+                btnToggleAffinity.Width = 115;
+                btnToggleAffinity.Margin = new Padding(3, 4, 3, 4);
+
+                btnOpenFile.Text = "📂 File / PDF";
+                btnOpenFile.Width = 95;
+                btnOpenFile.Margin = new Padding(3, 4, 3, 4);
+
+                btnClickThrough.Text = isClickThrough ? "🖱️ Clic Passa [ON]" : "🖱️ Clic-Passa";
+                btnClickThrough.Width = 110;
+                btnClickThrough.Margin = new Padding(3, 4, 3, 4);
+
+                btnDarkMode.Text = isForcedDark ? "🌙 Dark [ON]" : "☀️ Dark [OFF]";
+                btnDarkMode.Width = 100;
+                btnDarkMode.Margin = new Padding(3, 4, 3, 4);
+
+                btnPanic.Text = "🚨 Panic";
+                btnPanic.Width = 80;
+                btnPanic.Margin = new Padding(3, 4, 3, 4);
+
+                btnToggleMenu.Text = "▲ Nascondi";
+                btnToggleMenu.Width = 85;
+                btnToggleMenu.Margin = new Padding(3, 4, 3, 4);
+
+                btnMiniMode.Text = "🔍 Minuscola";
+                btnMiniMode.Width = 90;
+                btnMiniMode.Margin = new Padding(3, 4, 3, 4);
+
+                if (chkAlwaysOnTop != null)
+                {
+                    chkAlwaysOnTop.Visible = true;
+                    chkAlwaysOnTop.Text = "Sempre in primo";
+                }
+                if (chkHideTaskbar != null)
+                {
+                    chkHideTaskbar.Visible = true;
+                    chkHideTaskbar.Text = "👻 Stealth";
+                }
+
+                if (pnlOpacity != null)
+                {
+                    pnlOpacity.Width = 205;
+                    if (lblOpacity != null)
+                    {
+                        lblOpacity.Visible = true;
+                        lblOpacity.Location = new Point(4, 10);
+                        lblOpacity.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+                    }
+                    if (tbOpacity != null)
+                    {
+                        tbOpacity.Size = new Size(100, 30);
+                        tbOpacity.Location = new Point(96, 6);
+                    }
+                }
+
+                if (lblFooterStatus != null)
+                {
+                    lblFooterStatus.Visible = true;
+                    lblFooterStatus.Text = isClickThrough ?
+                        "🖱️ Clic-Attraverso ATTIVO: i clic passano alle finestre sotto | Premi [Ctrl+Alt+X] per disattivare" :
+                        "🔒 Trascina le schede per riordinarle | Click rotellina per chiudere | Trascina file/PDF per aprirli";
+                }
+            }
+            // Breakpoint 2: Finestra media (720 <= width < 980)
+            else if (width >= 720)
+            {
+                if (lblTitle != null) lblTitle.Visible = false;
+
+                btnToggleAffinity.Text = isProtected ? "🛡️ Protetto" : "⚠️ Off";
+                btnToggleAffinity.Width = 88;
+                btnToggleAffinity.Margin = new Padding(2, 4, 2, 4);
+
+                btnOpenFile.Text = "📂 File";
+                btnOpenFile.Width = 65;
+                btnOpenFile.Margin = new Padding(2, 4, 2, 4);
+
+                btnClickThrough.Text = isClickThrough ? "🖱️ ON" : "🖱️ Clic";
+                btnClickThrough.Width = 72;
+                btnClickThrough.Margin = new Padding(2, 4, 2, 4);
+
+                btnDarkMode.Text = isForcedDark ? "🌙 ON" : "☀️ OFF";
+                btnDarkMode.Width = 72;
+                btnDarkMode.Margin = new Padding(2, 4, 2, 4);
+
+                btnPanic.Text = "🚨 Panic";
+                btnPanic.Width = 70;
+                btnPanic.Margin = new Padding(2, 4, 2, 4);
+
+                btnToggleMenu.Text = "▲ Barra";
+                btnToggleMenu.Width = 68;
+                btnToggleMenu.Margin = new Padding(2, 4, 2, 4);
+
+                btnMiniMode.Text = "🔍 Mini";
+                btnMiniMode.Width = 68;
+                btnMiniMode.Margin = new Padding(2, 4, 2, 4);
+
+                if (chkAlwaysOnTop != null)
+                {
+                    chkAlwaysOnTop.Visible = true;
+                    chkAlwaysOnTop.Text = "📌 Top";
+                }
+                if (chkHideTaskbar != null)
+                {
+                    chkHideTaskbar.Visible = true;
+                    chkHideTaskbar.Text = "👻";
+                }
+
+                if (pnlOpacity != null)
+                {
+                    pnlOpacity.Width = 150;
+                    if (lblOpacity != null)
+                    {
+                        lblOpacity.Visible = true;
+                        lblOpacity.Location = new Point(2, 10);
+                        lblOpacity.Font = new Font("Segoe UI", 8.0f, FontStyle.Bold);
+                    }
+                    if (tbOpacity != null)
+                    {
+                        tbOpacity.Size = new Size(72, 30);
+                        tbOpacity.Location = new Point(74, 6);
+                    }
+                }
+
+                if (lblFooterStatus != null)
+                {
+                    lblFooterStatus.Visible = true;
+                    lblFooterStatus.Text = isClickThrough ?
+                        "🖱️ Clic-Attraverso ATTIVO [Ctrl+Alt+X]" :
+                        "🔒 Schede Chrome-like | Trascina file/PDF";
+                }
+            }
+            // Breakpoint 3: Finestra compatta a icone (480 <= width < 720)
+            else if (width >= 480)
+            {
+                if (lblTitle != null) lblTitle.Visible = false;
+
+                btnToggleAffinity.Text = isProtected ? "🛡️" : "⚠️";
+                btnToggleAffinity.Width = 36;
+                btnToggleAffinity.Margin = new Padding(2, 4, 2, 4);
+
+                btnOpenFile.Text = "📂";
+                btnOpenFile.Width = 36;
+                btnOpenFile.Margin = new Padding(2, 4, 2, 4);
+
+                btnClickThrough.Text = "🖱️";
+                btnClickThrough.Width = 36;
+                btnClickThrough.Margin = new Padding(2, 4, 2, 4);
+
+                btnDarkMode.Text = isForcedDark ? "🌙" : "☀️";
+                btnDarkMode.Width = 36;
+                btnDarkMode.Margin = new Padding(2, 4, 2, 4);
+
+                btnPanic.Text = "🚨";
+                btnPanic.Width = 36;
+                btnPanic.Margin = new Padding(2, 4, 2, 4);
+
+                btnToggleMenu.Text = "▲";
+                btnToggleMenu.Width = 36;
+                btnToggleMenu.Margin = new Padding(2, 4, 2, 4);
+
+                btnMiniMode.Text = "🔍";
+                btnMiniMode.Width = 36;
+                btnMiniMode.Margin = new Padding(2, 4, 2, 4);
+
+                if (chkAlwaysOnTop != null) chkAlwaysOnTop.Visible = false;
+                if (chkHideTaskbar != null) chkHideTaskbar.Visible = false;
+
+                if (pnlOpacity != null)
+                {
+                    pnlOpacity.Width = 110;
+                    if (lblOpacity != null) lblOpacity.Visible = false;
+                    if (tbOpacity != null)
+                    {
+                        tbOpacity.Size = new Size(98, 30);
+                        tbOpacity.Location = new Point(6, 6);
+                    }
+                }
+
+                if (lblFooterStatus != null) lblFooterStatus.Visible = false;
+            }
+            // Breakpoint 4: Finestra micro / card minima (< 480 fino a 320)
+            else
+            {
+                if (lblTitle != null) lblTitle.Visible = false;
+
+                btnToggleAffinity.Text = isProtected ? "🛡️" : "⚠️";
+                btnToggleAffinity.Width = 28;
+                btnToggleAffinity.Margin = new Padding(1, 4, 1, 4);
+
+                btnOpenFile.Text = "📂";
+                btnOpenFile.Width = 28;
+                btnOpenFile.Margin = new Padding(1, 4, 1, 4);
+
+                btnClickThrough.Text = "🖱️";
+                btnClickThrough.Width = 28;
+                btnClickThrough.Margin = new Padding(1, 4, 1, 4);
+
+                btnDarkMode.Text = isForcedDark ? "🌙" : "☀️";
+                btnDarkMode.Width = 28;
+                btnDarkMode.Margin = new Padding(1, 4, 1, 4);
+
+                btnPanic.Text = "🚨";
+                btnPanic.Width = 28;
+                btnPanic.Margin = new Padding(1, 4, 1, 4);
+
+                btnToggleMenu.Text = "▲";
+                btnToggleMenu.Width = 28;
+                btnToggleMenu.Margin = new Padding(1, 4, 1, 4);
+
+                btnMiniMode.Text = "🔍";
+                btnMiniMode.Width = 28;
+                btnMiniMode.Margin = new Padding(1, 4, 1, 4);
+
+                if (chkAlwaysOnTop != null) chkAlwaysOnTop.Visible = false;
+                if (chkHideTaskbar != null) chkHideTaskbar.Visible = false;
+
+                if (pnlOpacity != null)
+                {
+                    pnlOpacity.Width = 85;
+                    if (lblOpacity != null) lblOpacity.Visible = false;
+                    if (tbOpacity != null)
+                    {
+                        tbOpacity.Size = new Size(74, 30);
+                        tbOpacity.Location = new Point(5, 6);
+                    }
+                }
+
+                if (lblFooterStatus != null) lblFooterStatus.Visible = false;
+            }
+
+            // Barra ridotta secondaria (MiniBar quando menu principale è nascosto)
+            if (pnlMiniBar != null && lblMiniShortcuts != null)
+            {
+                if (width < 540)
+                {
+                    lblMiniShortcuts.Visible = false;
+                }
+                else if (width < 800)
+                {
+                    lblMiniShortcuts.Visible = true;
+                    lblMiniShortcuts.Text = "💡 [Ctrl+M] Barra | [Ctrl+Alt+Q] Panic | [Ctrl+Alt+P] Finestra";
+                }
+                else
+                {
+                    lblMiniShortcuts.Visible = true;
+                    lblMiniShortcuts.Text = "💡 [Ctrl+M] Barra | [Ctrl+Alt+Q] Panic | [Ctrl+Alt+P] Mostra/Nascondi | [Ctrl+Alt+X] Clic | [Ctrl+Shift+D] Dark | [Ctrl+Alt+0] 0%";
+                }
+            }
+        }
+
         private void BtnOpenFile_Click(object sender, EventArgs e)
         {
             using (OpenFileDialog ofd = new OpenFileDialog())
@@ -1318,7 +1645,12 @@ namespace PrivateViewerApp
         // ==============================================================================
         // AGGIUNTA SCHEDE BROWSER (Inserite prima del pulsante permanente [+])
         // ==============================================================================
-        public async void AddNewBrowserTab(string initialUrl)
+        public void AddNewBrowserTab(string initialUrl)
+        {
+            AddNewBrowserTab(initialUrl, true);
+        }
+
+        public async void AddNewBrowserTab(string initialUrl, bool selectTab)
         {
             TabPage tabPage = new TabPage("🌐 Scheda " + tabCounter++);
             tabPage.BackColor = Color.FromArgb(20, 20, 20);
@@ -1451,7 +1783,10 @@ namespace PrivateViewerApp
             {
                 tabControl.TabPages.Add(tabPage);
             }
-            tabControl.SelectedTab = tabPage;
+            if (selectTab)
+            {
+                tabControl.SelectedTab = tabPage;
+            }
 
             try
             {
@@ -1600,6 +1935,8 @@ namespace PrivateViewerApp
                                 window.chrome.webview.postMessage('OPACITY_ZERO');
                             } else if (e.ctrlKey && (e.altKey || e.shiftKey) && (e.key === '9' || e.keyCode === 57 || e.keyCode === 105)) {
                                 window.chrome.webview.postMessage('OPACITY_FULL');
+                            } else if (e.ctrlKey && (e.altKey || e.shiftKey) && (e.key === 'p' || e.key === 'P' || e.keyCode === 80)) {
+                                window.chrome.webview.postMessage('TOGGLE_SHOW');
                             }
                         }, true);
                     ");
@@ -1631,6 +1968,10 @@ namespace PrivateViewerApp
                             else if (msg == "OPACITY_FULL")
                             {
                                 this.BeginInvoke((Action)(() => SetOpacityExplicit(100)));
+                            }
+                            else if (msg == "TOGGLE_SHOW")
+                            {
+                                this.BeginInvoke((Action)(() => ToggleWindowFromTray()));
                             }
                         }
                         catch { }
@@ -1726,8 +2067,8 @@ namespace PrivateViewerApp
             {
                 SetWindowDisplayAffinity(this.Handle, WDA_NONE);
                 isProtected = false;
-                btnToggleAffinity.Text = "⚠️ Visibile (Disattivo)";
                 btnToggleAffinity.BackColor = Color.FromArgb(160, 60, 60);
+                UpdateToolbarResponsive(this.ClientSize.Width);
                 return;
             }
 
@@ -1742,7 +2083,6 @@ namespace PrivateViewerApp
             if (ok)
             {
                 isProtected = true;
-                btnToggleAffinity.Text = "🛡️ Protetto da Cattura";
                 btnToggleAffinity.BackColor = Color.FromArgb(34, 139, 34);
             }
             else
@@ -1750,9 +2090,9 @@ namespace PrivateViewerApp
                 // 3. Se il monitor/driver del PC della scuola non supporta l'hardware affinity,
                 // degrada silenziosamente SENZA bloccare l'interfaccia con popup di errore!
                 isProtected = false;
-                btnToggleAffinity.Text = "⚠️ Monitor Senza Affinity";
                 btnToggleAffinity.BackColor = Color.FromArgb(120, 80, 0);
             }
+            UpdateToolbarResponsive(this.ClientSize.Width);
         }
 
         private void BtnToggleAffinity_Click(object sender, EventArgs e)
@@ -1765,18 +2105,20 @@ namespace PrivateViewerApp
         // ==============================================================================
         public void RestoreWindow()
         {
-            this.Show();
+            allowShowDisplay = true;
+            this.Visible = true;
             this.WindowState = FormWindowState.Normal;
             ShowWindow(this.Handle, SW_RESTORE);
             ShowWindow(this.Handle, SW_SHOW);
             if (tbOpacity != null && tbOpacity.Value == 0)
             {
-                SetOpacityExplicit(15);
+                SetOpacityExplicit(85);
             }
             else
             {
-                this.Opacity = tbOpacity != null ? tbOpacity.Value / 100.0 : 0.15;
+                this.Opacity = tbOpacity != null ? Math.Max(0.15, tbOpacity.Value / 100.0) : 0.85;
             }
+            UpdateToolbarResponsive(this.ClientSize.Width);
             SetForegroundWindow(this.Handle);
             this.BringToFront();
             this.Activate();
@@ -1784,7 +2126,7 @@ namespace PrivateViewerApp
 
         private void ToggleWindowFromTray()
         {
-            if (!this.Visible || this.WindowState == FormWindowState.Minimized)
+            if (!allowShowDisplay || !this.Visible || this.WindowState == FormWindowState.Minimized)
             {
                 RestoreWindow();
             }
@@ -1803,10 +2145,11 @@ namespace PrivateViewerApp
 
         private void HideToTray()
         {
+            allowShowDisplay = false;
             this.Opacity = 0.0;
             ShowWindow(this.Handle, SW_HIDE);
             this.Visible = false;
-            trayIcon.Visible = true;
+            if (trayIcon != null) trayIcon.Visible = true;
         }
 
         protected override void OnResize(EventArgs e)
@@ -1814,15 +2157,18 @@ namespace PrivateViewerApp
             base.OnResize(e);
             if (this.WindowState == FormWindowState.Minimized)
             {
-                this.Opacity = 0.0;
-                ShowWindow(this.Handle, SW_HIDE);
-                this.Visible = false;
+                HideToTray();
+                return;
             }
             if (isMiniMode && tbMiniSize != null && this.WindowState == FormWindowState.Normal)
             {
                 int clamped = Math.Max(tbMiniSize.Minimum, Math.Min(tbMiniSize.Maximum, this.Width));
                 tbMiniSize.Value = clamped;
                 lblMiniSize.Text = string.Format("Dim: {0}", clamped);
+            }
+            if (this.WindowState == FormWindowState.Normal && !isMiniMode)
+            {
+                UpdateToolbarResponsive(this.ClientSize.Width);
             }
         }
 
@@ -1857,6 +2203,13 @@ namespace PrivateViewerApp
                 if (key == Keys.X && ctrlPressed && (altPressed || shiftPressed))
                 {
                     ToggleClickThrough();
+                    return true;
+                }
+
+                // Mostra / Nascondi rapido: Ctrl + Alt + P oppure Ctrl + Shift + P
+                if (key == Keys.P && ctrlPressed && (altPressed || shiftPressed))
+                {
+                    ToggleWindowFromTray();
                     return true;
                 }
 
@@ -1959,6 +2312,11 @@ namespace PrivateViewerApp
             if (keyData == (Keys.Control | Keys.Alt | Keys.X) || keyData == (Keys.Control | Keys.Shift | Keys.X))
             {
                 ToggleClickThrough();
+                return true;
+            }
+            if (keyData == (Keys.Control | Keys.Alt | Keys.P) || keyData == (Keys.Control | Keys.Shift | Keys.P))
+            {
+                ToggleWindowFromTray();
                 return true;
             }
             if (keyData == (Keys.Control | Keys.Shift | Keys.D))
@@ -2142,7 +2500,13 @@ namespace PrivateViewerApp
                 }
                 if (hotkeyId == HOTKEY_OPACITY_FULL)
                 {
+                    RestoreWindow();
                     SetOpacityExplicit(100);
+                    return;
+                }
+                if (hotkeyId == HOTKEY_TOGGLE_SHOW)
+                {
+                    ToggleWindowFromTray();
                     return;
                 }
             }
